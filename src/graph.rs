@@ -1,8 +1,7 @@
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
 
-use crate::vecops::{add, iadd, sub, mul, imul, div};
 use crate::{DType,ANode,NodeIdx};
+use crate::vecops::iadd;
 
 #[derive(Debug)]
 pub struct Graph {
@@ -18,12 +17,37 @@ impl Graph {
         }
     }
 
+    pub fn backward(&mut self, end_node: &ANode) {
+        // dz/dz of course is 1
+        let mut z_grad = self.get_or_create_grad(end_node);
+        z_grad.fill(1f32);
+        self.add_grad(end_node, z_grad);
+        self.recurse(end_node);
+    }
+
+    pub fn get_grad(&self, node: &ANode) -> Option<&Vec<DType>> {
+        self.gradients.get(&node.get_id())
+    }
+
+    pub fn clear_grads(&mut self) {
+        let mut hm = HashMap::new();
+        std::mem::swap(&mut hm, &mut self.gradients);
+        hm.into_values()
+            .for_each(|v| self.ret_temp_space(v));
+    }
+
+    pub fn clear_memory(&mut self) {
+        self.gradients.clear();
+        self.freelist.clear();
+    }
+
+
     fn get_or_create_grad(&mut self, node: &ANode) -> Vec<DType> {
         let n_idx = node.get_id();
         if self.gradients.contains_key(&n_idx)  {
             self.gradients.remove(&n_idx).unwrap()
         } else {
-            vec![0.; node.value().len()]
+            self.get_temp_space(node.value().len())
         }
     }
 
@@ -45,15 +69,7 @@ impl Graph {
     fn add_grad(&mut self, node: &ANode, grad: Vec<DType>) {
         self.gradients.insert(node.get_id(), grad);
     }
-
-    pub fn backward(&mut self, end_node: &ANode) {
-        // dz/dz of course is 1
-        let mut z_grad = self.get_or_create_grad(end_node);
-        z_grad.fill(1f32);
-        self.add_grad(end_node, z_grad);
-        self.recurse(end_node);
-    }
-
+    
     fn recurse(&mut self, node: &ANode) {
         if !node.is_leaf() {
             let node_grad = self.get_or_create_grad(node);
@@ -88,9 +104,6 @@ impl Graph {
         }
     }
 
-    pub fn get_grad(&self, node: &ANode) -> Option<&Vec<DType>> {
-        self.gradients.get(&node.get_id())
-    }
 
 }
 

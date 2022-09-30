@@ -36,7 +36,7 @@ pub trait Node {
 
     fn requires_grad(&self) -> bool;
 
-    fn compute_grad(&self, grad: &[DType], results: &mut [Vec<DType>]) { }
+    fn compute_grad(&self, _grad: &[DType], _results: &mut [Vec<DType>]) { }
 
 }
 

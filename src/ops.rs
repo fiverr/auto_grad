@@ -1,5 +1,5 @@
 use crate::*;
-use crate::vecops::{add, iadd, sub, mul, imul, div};
+use crate::vecops::{add, sub, mul, imul, div};
 
 #[derive(Clone)]
 struct Computation {
@@ -350,13 +350,9 @@ impl Node for SumVec {
     fn compute_grad(&self, grad: &[DType], results: &mut [Vec<DType>]) {
         // f(x) = x.sum()
         // df(x)/dx_1 = 1;
-        // df(x)/dy_2 = ln(y) * x ^ y
-        let x = self.1[0].value();
-        
-        let mut out = &mut results[0];
+        let out = &mut results[0];
         out.fill(grad[0]);
     }
-
 }
 
 
