@@ -72,6 +72,10 @@ impl ANode {
         Exp::new(self.clone())
     }
 
+    pub fn sum(&self) -> ANode {
+        SumVec::new(self.clone())
+    }
+
 }
 
 trait FromConstant {

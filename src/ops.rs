@@ -49,9 +49,15 @@ impl Constant {
         let c = Constant(NodeIdx::new(), Computation::new(value));
         ANode::new(Arc::new(c))
     }
+
     pub fn scalar(value: DType) -> ANode {
         Constant::new(vec![value])
     }
+
+    pub fn broadcast(value: DType, size: usize) -> ANode {
+        Constant::new(vec![value; size])
+    }
+
 }
 
 impl Node for Constant {
@@ -68,6 +74,46 @@ impl Node for Constant {
     fn requires_grad(&self) -> bool { false }
 }
 
+struct Broadcast<'a> {
+    vec: &'a [DType],
+    remaining: usize,
+    len: usize
+}
+
+impl <'a> Broadcast<'a> {
+    fn new<'b>(vec: &'a [DType], other: &'b [DType]) -> Self {
+        if vec.len() == 1 || vec.len() == other.len() {
+            Broadcast { vec, remaining: other.len(), len: other.len() }
+        } else if other.len() == 1 {
+            Broadcast { vec, remaining: vec.len(), len: vec.len() }
+        } else {
+            panic!("Cannot broadcast values!");
+        }
+    }
+
+    fn from_pair<'b>(left: &'a [DType], right: &'b [DType]) -> (Self, Broadcast<'b>) {
+        (Broadcast::new(left, right), Broadcast::new(right, left))
+    }
+}
+
+impl <'a> Iterator for Broadcast<'a> {
+    type Item = &'a DType;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.remaining == 0 {
+            None
+        } else {
+            let v_len = self.vec.len();
+            if v_len > 1 {
+                let idx = v_len - self.remaining;
+                self.remaining -= 1;
+                Some(&self.vec[idx])
+            } else {
+                self.remaining -= 1;
+                Some(&self.vec[0])
+            }
+        }
+    }
+}
 
 pub(crate) struct AddN(NodeIdx, Vec<ANode>, Computation);
 
@@ -80,11 +126,8 @@ impl AddN {
     }
 
     fn compute(left: &ANode, right: &ANode) -> Vec<DType> {
-        let lv = left.value();
-        let rv = right.value();
-        let mut out = vec![0.; lv.len()];
-        add(&lv, &rv, &mut out);
-        out
+        let (lv, rv) = Broadcast::from_pair(left.value(), right.value());
+        lv.zip(rv).map(|(lvi, rvi)| lvi + rvi).collect()
     }
 }
 
@@ -124,11 +167,8 @@ impl Subtract {
     }
 
     fn compute(left: &ANode, right: &ANode) -> Vec<DType> {
-        let lv = left.value();
-        let rv = right.value();
-        let mut out = vec![0.; lv.len()];
-        sub(&lv, &rv, &mut out);
-        out
+        let (lv, rv) = Broadcast::from_pair(left.value(), right.value());
+        lv.zip(rv).map(|(lvi, rvi)| lvi - rvi).collect()
     }
 }
 
@@ -171,11 +211,8 @@ impl Multiply {
     }
 
     fn compute(left: &ANode, right: &ANode) -> Vec<DType> {
-        let lv = left.value();
-        let rv = right.value();
-        let mut out = vec![0.; lv.len()];
-        mul(lv, rv, &mut out);
-        out
+        let (lv, rv) = Broadcast::from_pair(left.value(), right.value());
+        lv.zip(rv).map(|(lvi, rvi)| lvi * rvi).collect()
     }
 }
 
@@ -220,11 +257,8 @@ impl Divide {
     }
 
     fn compute(left: &ANode, right: &ANode) -> Vec<DType> {
-        let lv = left.value();
-        let rv = right.value();
-        let mut out = vec![0.; lv.len()];
-        div(lv, rv, &mut out);
-        out
+        let (lv, rv) = Broadcast::from_pair(left.value(), right.value());
+        lv.zip(rv).map(|(lvi, rvi)| lvi / rvi).collect()
     }
 }
 
@@ -275,9 +309,8 @@ impl Power {
     }
 
     fn compute(left: &ANode, right: &ANode) -> Vec<DType> {
-        let lv = left.value();
-        let rv = right.value();
-        lv.iter().zip(rv.iter()).map(|(lvi, rvi)| lvi.powf(*rvi)).collect()
+        let (lv, rv) = Broadcast::from_pair(left.value(), right.value());
+        lv.zip(rv).map(|(lvi, rvi)| lvi.powf(*rvi)).collect()
     }
 }
 
@@ -302,6 +335,7 @@ impl Node for Power {
         // df(x,y)/dy = ln(y) * x ^ y
         let x = self.1[0].value();
         let y = self.1[1].value();
+        println!("Power Grads: {:?}", results);
         
         let mut out = &mut results[0];
         out.iter_mut().zip(x.iter().zip(y.iter()))
@@ -351,8 +385,9 @@ impl Node for SumVec {
     fn compute_grad(&self, grad: &[DType], results: &mut [Vec<DType>]) {
         // f(x) = x.sum()
         // df(x)/dx_1 = 1;
-        let out = &mut results[0];
-        out.fill(grad[0]);
+        for out in results.iter_mut() {
+            out.fill(grad[0]);
+        }
     }
 }
 
@@ -612,11 +647,25 @@ mod tests {
     }
 
     #[test]
+    fn test_add_scalar() {
+        let x = Variable::new(vec![0., 1.]);
+        let res = AddN::new(x, Constant::scalar(2f32));
+        assert_eq!(res.value(), &[2., 3.]);
+    }
+
+    #[test]
     fn test_sub() {
         let x = Variable::new(vec![0., 1.]);
         let y = Variable::new(vec![2., 3.]);
         let res = Subtract::new(x, y);
         assert_eq!(res.value(), &[-2., -2.]);
+    }
+
+    #[test]
+    fn test_sub_scalar() {
+        let x = Variable::new(vec![0., 1.]);
+        let res = Subtract::new(x, Constant::scalar(2f32));
+        assert_eq!(res.value(), &[-2., -1.]);
     }
 
     #[test]
@@ -628,11 +677,25 @@ mod tests {
     }
 
     #[test]
+    fn test_mul_scalar() {
+        let x = Variable::new(vec![0., 1.]);
+        let res = Multiply::new(x, Constant::scalar(2f32));
+        assert_eq!(res.value(), &[0., 2.]);
+    }
+
+    #[test]
     fn test_div() {
         let x = Variable::new(vec![0., 1.]);
         let y = Variable::new(vec![2., 3.]);
         let res = Divide::new(x, y);
         assert_eq!(res.value(), &[0., 1./3.]);
+    }
+
+    #[test]
+    fn test_div_scalar() {
+        let x = Variable::new(vec![2., 1.]);
+        let res = Divide::new(x, Constant::scalar(2f32));
+        assert_eq!(res.value(), &[1., 0.5]);
     }
 
     #[test]
@@ -644,6 +707,17 @@ mod tests {
     }
 
     #[test]
+    fn test_pow_scalar() {
+        let x = Variable::new(vec![0., 1., 2.]);
+        let y = Variable::new(vec![2.]);
+        let res = Power::new(x.clone(), y);
+        assert_eq!(res.value(), &[0., 1., 4.]);
+
+        let res = x.pow(3f32);
+        assert_eq!(res.value(), &[0., 1., 8.]);
+    }
+
+    #[test]
     fn test_exp() {
         let x = Variable::new(vec![0., 1., 2.]);
         let out = (&x).exp();
@@ -651,6 +725,19 @@ mod tests {
         graph.backward(&out);
         let grad = graph.get_grad(&x);
         assert_eq!(out.value(), &[1., 1f32.exp(), 2f32.exp()]);
+    }
+
+    #[test]
+    fn test_sum() {
+        let x = Variable::new(vec![0., 1., 2.]);
+        let out = x.sum();
+        assert_eq!(out.value(), vec![3f32]);
+        let mut graph = Graph::new();
+
+        graph.backward(&out);
+
+        let grad = graph.get_grad(&x).unwrap();
+        assert_eq!(grad, &[1f32, 1f32, 1f32]);
     }
 
     #[test]
@@ -820,11 +907,15 @@ mod tests {
         assert_eq!(Some(&vec![expected]), x_grad);
     }
 
+    fn sigmoid(x: &ANode) -> ANode {
+        1f32 / ((-x).exp() + 1f32)
+    }
+
     #[test]
     fn test_logistic() {
         // 1 / (1 + e ^ -x)
         let x = Variable::new(vec![0f32]);
-        let res = 1f32 / &(&(-&x).exp() + 1f32);
+        let res = sigmoid(&x);
         assert_eq!(res.value(), vec![0.5]);
 
         let mut graph = Graph::new();
@@ -833,6 +924,40 @@ mod tests {
         let x_grad = graph.get_grad(&x);
         let sigma_trick = res.value()[0] * (1f32 - res.value()[0]);
         assert_eq!(Some(&vec![sigma_trick]), x_grad);
+    }
+
+    #[test]
+    fn test_simple_sgd() {
+        let y = Constant::new(vec![3f32,-4f32]);
+        let mut v = vec![0f32, 0f32]; 
+        let mut graph = Graph::new();
+        for p in 0..1 {
+            println!("pass {}, x: {:?}", p, v);
+
+            let x = Variable::new(v.clone());
+            let c = Constant::scalar(2f32);
+            let y1 = &x - &y;
+            let y2 = (&y1).pow(&c);
+            let res = (&y2).sum();
+            println!("x => {:?}", x.get_id());
+            println!("y => {:?}", y.get_id());
+            println!("2 => {:?}", c.get_id());
+            println!("x - y => {:?}", y1.get_id());
+            println!("^ 2 => {:?}", y2.get_id());
+            println!("sum() => {:?}", res.get_id());
+
+            println!("Error: {}", res.value()[0]);
+
+            graph.backward(&res);
+            let x_grad = graph.get_grad(&x).unwrap();
+            println!("x grad: {:?}", x_grad);
+            
+            // SGD!
+            v.iter_mut().zip(x_grad.iter()).for_each(|(vi, gi)| {
+                *vi -= 1e-1 * *gi;
+            });
+        }
+        panic!();
     }
 
 }
