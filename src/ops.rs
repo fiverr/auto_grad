@@ -21,6 +21,9 @@ impl Variable {
         let v = Variable(NodeIdx::new(), Computation::new(value));
         ANode::new(Arc::new(v))
     }
+    pub fn scalar(value: DType) -> ANode {
+        Variable::new(vec![value])
+    }
 }
 
 impl Node for Variable {
@@ -36,7 +39,7 @@ impl Node for Variable {
 
     fn requires_grad(&self) -> bool { true }
 
-    fn compute_grad(&self, _grad: &[DType], _results: &mut [Vec<DType>]) {
+    fn compute_grad(&self, _grad: &[DType], _child_grads: &mut [Vec<DType>]) {
         // Pass
     }
 }
@@ -82,9 +85,13 @@ struct Broadcast<'a> {
 
 impl <'a> Broadcast<'a> {
     fn new<'b>(vec: &'a [DType], other: &'b [DType]) -> Self {
-        if vec.len() == 1 || vec.len() == other.len() {
-            Broadcast { vec, remaining: other.len(), len: other.len() }
-        } else if other.len() == 1 {
+        Broadcast::sized(vec, other.len())
+    }
+
+    fn sized(vec: &'a [DType], other: usize) -> Self {
+        if vec.len() == 1 || vec.len() == other {
+            Broadcast { vec, remaining: other, len: other }
+        } else if other == 1 {
             Broadcast { vec, remaining: vec.len(), len: vec.len() }
         } else {
             panic!("Cannot broadcast values!");
@@ -111,6 +118,32 @@ impl <'a> Iterator for Broadcast<'a> {
                 self.remaining -= 1;
                 Some(&self.vec[0])
             }
+        }
+    }
+}
+
+struct Updater<'a> {
+    data: &'a mut [DType],
+    cur_idx: usize,
+    max_size: usize
+}
+
+impl <'a> Updater<'a> {
+    fn new(data: &'a mut [DType], max_size: usize) -> Self {
+        let v_len = data.len();
+        if v_len == max_size || v_len == 1 {
+            Updater { data, cur_idx: 0, max_size }
+        } else {
+            panic!("Cannot broadcast values!");
+        }
+    }
+
+    fn add(&mut self, v: DType) {
+        if self.data.len() == 1 {
+            self.data[0] += v;
+        } else {
+            self.data[self.cur_idx] += v;
+            self.cur_idx += 1;
         }
     }
 }
@@ -146,12 +179,15 @@ impl Node for AddN {
 
     fn requires_grad(&self) -> bool { false }
 
-    fn compute_grad(&self, grad: &[DType], results: &mut [Vec<DType>]) {
+    fn compute_grad(&self, grad: &[DType], child_grads: &mut [Vec<DType>]) {
         // f(x,y) = x - y
         // df(x,y)/dx = 1
         // df(x,y)/dy = 1
-        results[0].clone_from_slice(grad);
-        results[1].clone_from_slice(grad);
+        for out in child_grads.iter_mut() {
+            let mut it  = Broadcast::sized(grad, out.len());
+            let mut agg = Updater::new(out, grad.len());
+            it.for_each(|gi| agg.add(*gi));
+        }
     }
 
 }
@@ -187,15 +223,15 @@ impl Node for Subtract {
 
     fn requires_grad(&self) -> bool { false }
 
-    fn compute_grad(&self, grad: &[DType], results: &mut [Vec<DType>]) {
+    fn compute_grad(&self, grad: &[DType], child_grads: &mut [Vec<DType>]) {
         // f(x,y) = x - y
         // df(x,y)/dx = 1
         // df(x,y)/dy = -1
-        results[0].fill(1f32);
-        imul(&mut results[0], grad);
+        let mut out = Updater::new(&mut child_grads[0], grad.len());
+        grad.iter().for_each(|gi| out.add(*gi));
 
-        results[1].fill(-1f32);
-        imul(&mut results[1], grad);
+        let mut out = Updater::new(&mut child_grads[1], grad.len());
+        grad.iter().for_each(|gi| out.add(-*gi));
     }
 
 }
@@ -231,17 +267,22 @@ impl Node for Multiply {
 
     fn requires_grad(&self) -> bool { false }
 
-    fn compute_grad(&self, grad: &[DType], results: &mut [Vec<DType>]) {
+    fn compute_grad(&self, grad: &[DType], child_grads: &mut [Vec<DType>]) {
         // f(x,y) = x * y
         // df(x,y)/dx = y
         // df(x,y)/dy = x
         let x = self.1[0].value();
         let y = self.1[1].value();
-        results[0].clone_from_slice(y);
-        imul(&mut results[0], &grad);
 
-        results[1].clone_from_slice(x);
-        imul(&mut results[1], &grad);
+        // x.len() = 1, x_grad.len() = 1, y.len() == 3, y_grad.len() = 3, grad.len() = 3
+        let mut ly  = Broadcast::sized(y, child_grads[0].len());
+        let mut out = Updater::new(&mut child_grads[0], grad.len());
+        grad.iter().zip(ly).for_each(|(gi, yi)| out.add(*gi * *yi));
+
+        let mut lx  = Broadcast::sized(x, child_grads[1].len());
+        let mut out = Updater::new(&mut child_grads[1], grad.len());
+        grad.iter().zip(lx).for_each(|(gi, xi)| out.add(*gi * *xi));
+
     }
 
 }
@@ -277,23 +318,20 @@ impl Node for Divide {
 
     fn requires_grad(&self) -> bool { false }
 
-    fn compute_grad(&self, grad: &[DType], results: &mut [Vec<DType>]) {
+    fn compute_grad(&self, grad: &[DType], child_grads: &mut [Vec<DType>]) {
         // f(x,y) = x / y
         let x = self.1[0].value();
         let y = self.1[1].value();
-        // df(x,y)/dx = 1 / y
-        let mut out = &mut results[0];
-        out.iter_mut().zip(y.iter())
-            .for_each(|(oi, yi)| *oi = 1f32 / *yi);
-
-        imul(&mut out, grad);
         
-        // df(x,y)/dy = x / y ^ 2
-        let mut out = &mut results[1];
-        out.iter_mut().zip(x.iter().zip(y.iter())).for_each(|(oi, (xi, yi))| {
-            *oi = -*xi / yi.powf(2f32);
-        });
-        imul(&mut out, grad);
+        // df(x,y)/dx = 1 / y
+        let mut ly  = Broadcast::sized(y, child_grads[0].len());
+        let mut out = Updater::new(&mut child_grads[0], grad.len());
+        grad.iter().zip(ly).for_each(|(gi, yi)| out.add(*gi / *yi));
+
+        // df(x,y)/dy = -x / y ^ 2
+        let (lx, ly) = Broadcast::from_pair(x, y);
+        let mut out = Updater::new(&mut child_grads[1], lx.len);
+        grad.iter().zip(lx.zip(ly)).for_each(|(gi, (xi, yi))| out.add(*gi * -*xi / yi.powf(2f32)));
     }
 
 }
@@ -329,24 +367,26 @@ impl Node for Power {
 
     fn requires_grad(&self) -> bool { false }
 
-    fn compute_grad(&self, grad: &[DType], results: &mut [Vec<DType>]) {
+    fn compute_grad(&self, grad: &[DType], child_grads: &mut [Vec<DType>]) {
         // f(x,y) = x ^ y
         // df(x,y)/dx = y * x ^ (y - 1)
         // df(x,y)/dy = ln(y) * x ^ y
         let x = self.1[0].value();
         let y = self.1[1].value();
-        println!("Power Grads: {:?}", results);
-        
-        let mut out = &mut results[0];
-        out.iter_mut().zip(x.iter().zip(y.iter()))
-            .for_each(|(oi, (xi, yi))| *oi = *yi * xi.powf(*yi - 1f32));
-        imul(&mut out, grad);
-        
-        let mut out = &mut results[1];
 
-        out.iter_mut().zip(x.iter().zip(y.iter()))
-            .for_each(|(oi, (xi, yi))| *oi = (yi).ln() * xi.powf(*yi));
-        imul(&mut out, grad);
+        // df(x,y)/dx = y * x ^ (y - 1)
+        let (lx, ly) = Broadcast::from_pair(x, y);
+        let mut out = Updater::new(&mut child_grads[0], lx.len);
+        grad.iter().zip(lx.zip(ly)).for_each(|(gi, (xi, yi))| {
+            out.add(*gi * *yi * xi.powf(*yi - 1f32));
+        });
+        
+        // df(x,y)/dy = ln(y) * x ^ y
+        let (lx, ly) = Broadcast::from_pair(x, y);
+        let mut out = Updater::new(&mut child_grads[1], lx.len);
+        grad.iter().zip(lx.zip(ly)).for_each(|(gi, (xi, yi))| {
+            out.add(*gi * yi.ln() * xi.powf(*yi));
+        });
     }
 
 }
@@ -382,10 +422,10 @@ impl Node for SumVec {
 
     fn requires_grad(&self) -> bool { false }
 
-    fn compute_grad(&self, grad: &[DType], results: &mut [Vec<DType>]) {
+    fn compute_grad(&self, grad: &[DType], child_grads: &mut [Vec<DType>]) {
         // f(x) = x.sum()
         // df(x)/dx_1 = 1;
-        for out in results.iter_mut() {
+        for out in child_grads.iter_mut() {
             out.fill(grad[0]);
         }
     }
@@ -422,9 +462,9 @@ impl Node for Cos {
 
     fn requires_grad(&self) -> bool { false }
 
-    fn compute_grad(&self, grad: &[DType], results: &mut [Vec<DType>]) {
+    fn compute_grad(&self, grad: &[DType], child_grads: &mut [Vec<DType>]) {
         let x = self.1[0].value();
-        let out = &mut results[0];
+        let out = &mut child_grads[0];
         out.iter_mut().zip(grad.iter().zip(x.iter())).for_each(|(oi, (gi, xi))| {
             *oi = *gi * -xi.sin()
         });
@@ -462,9 +502,9 @@ impl Node for Sin {
 
     fn requires_grad(&self) -> bool { false }
 
-    fn compute_grad(&self, grad: &[DType], results: &mut [Vec<DType>]) {
+    fn compute_grad(&self, grad: &[DType], child_grads: &mut [Vec<DType>]) {
         let x = self.1[0].value();
-        let out = &mut results[0];
+        let out = &mut child_grads[0];
         out.iter_mut().zip(grad.iter().zip(x.iter())).for_each(|(oi, (gi, xi))| {
             *oi = *gi * xi.cos()
         });
@@ -502,9 +542,9 @@ impl Node for Ln {
 
     fn requires_grad(&self) -> bool { false }
 
-    fn compute_grad(&self, grad: &[DType], results: &mut [Vec<DType>]) {
+    fn compute_grad(&self, grad: &[DType], child_grads: &mut [Vec<DType>]) {
         let x = self.1[0].value();
-        let out = &mut results[0];
+        let out = &mut child_grads[0];
         out.iter_mut().zip(grad.iter().zip(x.iter())).for_each(|(oi, (gi, xi))| {
             *oi = *gi / *xi
         });
@@ -542,9 +582,9 @@ impl Node for Exp {
 
     fn requires_grad(&self) -> bool { false }
 
-    fn compute_grad(&self, grad: &[DType], results: &mut [Vec<DType>]) {
+    fn compute_grad(&self, grad: &[DType], child_grads: &mut [Vec<DType>]) {
         let x = self.value();
-        let mut out = &mut results[0];
+        let mut out = &mut child_grads[0];
         out.clone_from_slice(x);
         imul(&mut out, grad);
     }
@@ -581,8 +621,8 @@ impl Node for Negate {
 
     fn requires_grad(&self) -> bool { false }
 
-    fn compute_grad(&self, grad: &[DType], results: &mut [Vec<DType>]) {
-        results[0].iter_mut().zip(grad.iter()).for_each(|(oi, gi)| {
+    fn compute_grad(&self, grad: &[DType], child_grads: &mut [Vec<DType>]) {
+        child_grads[0].iter_mut().zip(grad.iter()).for_each(|(oi, gi)| {
             *oi = -*gi;
         });
     }
@@ -623,10 +663,10 @@ impl Node for BulkSum {
 
     fn requires_grad(&self) -> bool { false }
 
-    fn compute_grad(&self, grad: &[DType], results: &mut [Vec<DType>]) {
+    fn compute_grad(&self, grad: &[DType], child_grads: &mut [Vec<DType>]) {
         // Just the gradient for each, easy peasy
         let x = self.value();
-        for out in results.iter_mut() {
+        for out in child_grads.iter_mut() {
             out.clone_from_slice(grad);
         }
     }
@@ -649,8 +689,17 @@ mod tests {
     #[test]
     fn test_add_scalar() {
         let x = Variable::new(vec![0., 1.]);
-        let res = AddN::new(x, Constant::scalar(2f32));
+        let y = Variable::new(vec![2.]);
+        let res = &x + &y;
         assert_eq!(res.value(), &[2., 3.]);
+
+        let mut graph = Graph::new();
+        graph.backward(&res);
+
+        let res = graph.get_grad(&x).unwrap();
+        assert_eq!(res, &[1., 1.]);
+        let res = graph.get_grad(&y).unwrap();
+        assert_eq!(res, &[2.]);
     }
 
     #[test]
@@ -664,8 +713,18 @@ mod tests {
     #[test]
     fn test_sub_scalar() {
         let x = Variable::new(vec![0., 1.]);
-        let res = Subtract::new(x, Constant::scalar(2f32));
+        let y = Variable::scalar(2f32);
+        let res = &x - &y;
         assert_eq!(res.value(), &[-2., -1.]);
+
+        let mut graph = Graph::new();
+        graph.backward(&res);
+
+        let x_grad = graph.get_grad(&x).unwrap();
+        let y_grad = graph.get_grad(&y).unwrap();
+        assert_eq!(x_grad, &[1., 1.]);
+        assert_eq!(y_grad, &[-2.]);
+
     }
 
     #[test]
@@ -678,9 +737,18 @@ mod tests {
 
     #[test]
     fn test_mul_scalar() {
-        let x = Variable::new(vec![0., 1.]);
-        let res = Multiply::new(x, Constant::scalar(2f32));
-        assert_eq!(res.value(), &[0., 2.]);
+        let x = Variable::new(vec![1., 2.]);
+        let y = Variable::scalar(3f32);
+        let res = &x * &y;
+        assert_eq!(res.value(), &[3., 6.]);
+
+        let mut graph = Graph::new();
+        graph.backward(&res);
+
+        let x_grad = graph.get_grad(&x).unwrap();
+        let y_grad = graph.get_grad(&y).unwrap();
+        assert_eq!(x_grad, &[3., 3.]);
+        assert_eq!(y_grad, &[3.]);
     }
 
     #[test]
@@ -693,9 +761,18 @@ mod tests {
 
     #[test]
     fn test_div_scalar() {
-        let x = Variable::new(vec![2., 1.]);
-        let res = Divide::new(x, Constant::scalar(2f32));
-        assert_eq!(res.value(), &[1., 0.5]);
+        let x = Variable::new(vec![1., 2.]);
+        let y = Variable::scalar(3f32);
+        let res = &x / &y;
+        assert_eq!(res.value(), &[1./3., 2./3.]);
+
+        let mut graph = Graph::new();
+        graph.backward(&res);
+
+        let x_grad = graph.get_grad(&x).unwrap();
+        let y_grad = graph.get_grad(&y).unwrap();
+        assert_eq!(x_grad, &[1./3., 1./3.]);
+        assert_eq!(y_grad, &[-1./3.]);
     }
 
     #[test]
@@ -708,13 +785,21 @@ mod tests {
 
     #[test]
     fn test_pow_scalar() {
-        let x = Variable::new(vec![0., 1., 2.]);
-        let y = Variable::new(vec![2.]);
-        let res = Power::new(x.clone(), y);
-        assert_eq!(res.value(), &[0., 1., 4.]);
+        let x = Variable::new(vec![1., 2.]);
+        let y = Variable::scalar(3f32);
+        let res = (&x).pow(&y);
+        assert_eq!(res.value(), &[1., 8.]);
 
-        let res = x.pow(3f32);
-        assert_eq!(res.value(), &[0., 1., 8.]);
+        let mut graph = Graph::new();
+        graph.backward(&res);
+
+        let x_grad = graph.get_grad(&x).unwrap();
+        let y_grad = graph.get_grad(&y).unwrap();
+        assert_eq!(x_grad, &[3., 12.]);
+        
+        // df(x,y)/dy = ln(y) * x ^ y
+        let e_y_grad = 3f32.ln() * (1f32.powf(3.) + 2f32.powf(3.));
+        assert_eq!(y_grad, &[e_y_grad]);
     }
 
     #[test]
