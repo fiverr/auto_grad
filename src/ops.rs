@@ -1,5 +1,5 @@
 use crate::*;
-use crate::vecops::{add, sub, mul, imul, div};
+use crate::vecops::{add, sub, isub, mul, imul, div};
 
 #[derive(Clone)]
 struct Computation {
@@ -67,6 +67,7 @@ impl Node for Constant {
 
     fn requires_grad(&self) -> bool { false }
 }
+
 
 pub(crate) struct AddN(NodeIdx, Vec<ANode>, Computation);
 
@@ -256,7 +257,7 @@ impl Node for Divide {
         // df(x,y)/dy = x / y ^ 2
         let mut out = &mut results[1];
         out.iter_mut().zip(x.iter().zip(y.iter())).for_each(|(oi, (xi, yi))| {
-            *oi = *xi / yi.powf(2f32);
+            *oi = -*xi / yi.powf(2f32);
         });
         imul(&mut out, grad);
     }
@@ -355,6 +356,204 @@ impl Node for SumVec {
     }
 }
 
+pub(crate) struct Cos(NodeIdx, Vec<ANode>, Computation);
+
+impl Cos {
+    pub(crate) fn new(vec: ANode) -> ANode {
+        let idx = NodeIdx::new();
+        let value = Cos::compute(&vec);
+        let node = Cos(idx, vec![vec], Computation::new(value));
+        ANode::new(Arc::new(node))
+    }
+
+    fn compute(left: &ANode) -> Vec<DType> {
+        let lv = left.value();
+        lv.iter().map(|lvi| lvi.cos()).collect()
+    }
+}
+
+impl Node for Cos {
+    fn get_id(&self) -> NodeIdx { self.0.clone() }
+
+    fn get_children(&self) -> Option<&[ANode]> { 
+        Some(self.1.as_slice())
+    }
+
+    fn is_leaf(&self) -> bool { false }
+
+    fn value(&self) -> &[DType] {
+        &self.2.value
+    }
+
+    fn requires_grad(&self) -> bool { false }
+
+    fn compute_grad(&self, grad: &[DType], results: &mut [Vec<DType>]) {
+        let x = self.1[0].value();
+        let out = &mut results[0];
+        out.iter_mut().zip(grad.iter().zip(x.iter())).for_each(|(oi, (gi, xi))| {
+            *oi = *gi * -xi.sin()
+        });
+    }
+}
+
+pub(crate) struct Sin(NodeIdx, Vec<ANode>, Computation);
+
+impl Sin {
+    pub(crate) fn new(vec: ANode) -> ANode {
+        let idx = NodeIdx::new();
+        let value = Sin::compute(&vec);
+        let node = Sin(idx, vec![vec], Computation::new(value));
+        ANode::new(Arc::new(node))
+    }
+
+    fn compute(left: &ANode) -> Vec<DType> {
+        let lv = left.value();
+        lv.iter().map(|lvi| lvi.sin()).collect()
+    }
+}
+
+impl Node for Sin {
+    fn get_id(&self) -> NodeIdx { self.0.clone() }
+
+    fn get_children(&self) -> Option<&[ANode]> { 
+        Some(self.1.as_slice())
+    }
+
+    fn is_leaf(&self) -> bool { false }
+
+    fn value(&self) -> &[DType] {
+        &self.2.value
+    }
+
+    fn requires_grad(&self) -> bool { false }
+
+    fn compute_grad(&self, grad: &[DType], results: &mut [Vec<DType>]) {
+        let x = self.1[0].value();
+        let out = &mut results[0];
+        out.iter_mut().zip(grad.iter().zip(x.iter())).for_each(|(oi, (gi, xi))| {
+            *oi = *gi * xi.cos()
+        });
+    }
+}
+
+pub(crate) struct Ln(NodeIdx, Vec<ANode>, Computation);
+
+impl Ln {
+    pub(crate) fn new(vec: ANode) -> ANode {
+        let idx = NodeIdx::new();
+        let value = Ln::compute(&vec);
+        let node = Ln(idx, vec![vec], Computation::new(value));
+        ANode::new(Arc::new(node))
+    }
+
+    fn compute(left: &ANode) -> Vec<DType> {
+        let lv = left.value();
+        lv.iter().map(|lvi| lvi.ln()).collect()
+    }
+}
+
+impl Node for Ln {
+    fn get_id(&self) -> NodeIdx { self.0.clone() }
+
+    fn get_children(&self) -> Option<&[ANode]> { 
+        Some(self.1.as_slice())
+    }
+
+    fn is_leaf(&self) -> bool { false }
+
+    fn value(&self) -> &[DType] {
+        &self.2.value
+    }
+
+    fn requires_grad(&self) -> bool { false }
+
+    fn compute_grad(&self, grad: &[DType], results: &mut [Vec<DType>]) {
+        let x = self.1[0].value();
+        let out = &mut results[0];
+        out.iter_mut().zip(grad.iter().zip(x.iter())).for_each(|(oi, (gi, xi))| {
+            *oi = *gi / *xi
+        });
+    }
+}
+
+pub(crate) struct Exp(NodeIdx, Vec<ANode>, Computation);
+
+impl Exp {
+    pub(crate) fn new(vec: ANode) -> ANode {
+        let idx = NodeIdx::new();
+        let value = Exp::compute(&vec);
+        let node = Exp(idx, vec![vec], Computation::new(value));
+        ANode::new(Arc::new(node))
+    }
+
+    fn compute(left: &ANode) -> Vec<DType> {
+        let lv = left.value();
+        lv.iter().map(|lvi| lvi.exp()).collect()
+    }
+}
+
+impl Node for Exp {
+    fn get_id(&self) -> NodeIdx { self.0.clone() }
+
+    fn get_children(&self) -> Option<&[ANode]> { 
+        Some(self.1.as_slice())
+    }
+
+    fn is_leaf(&self) -> bool { false }
+
+    fn value(&self) -> &[DType] {
+        &self.2.value
+    }
+
+    fn requires_grad(&self) -> bool { false }
+
+    fn compute_grad(&self, grad: &[DType], results: &mut [Vec<DType>]) {
+        let x = self.value();
+        let mut out = &mut results[0];
+        out.clone_from_slice(x);
+        imul(&mut out, grad);
+    }
+}
+
+pub(crate) struct Negate(NodeIdx, Vec<ANode>, Computation);
+
+impl Negate {
+    pub(crate) fn new(vec: ANode) -> ANode {
+        let idx = NodeIdx::new();
+        let value = Negate::compute(&vec);
+        let node = Negate(idx, vec![vec], Computation::new(value));
+        ANode::new(Arc::new(node))
+    }
+
+    fn compute(left: &ANode) -> Vec<DType> {
+        let lv = left.value();
+        lv.iter().map(|lvi| -lvi).collect()
+    }
+}
+
+impl Node for Negate {
+    fn get_id(&self) -> NodeIdx { self.0.clone() }
+
+    fn get_children(&self) -> Option<&[ANode]> { 
+        Some(self.1.as_slice())
+    }
+
+    fn is_leaf(&self) -> bool { false }
+
+    fn value(&self) -> &[DType] {
+        &self.2.value
+    }
+
+    fn requires_grad(&self) -> bool { false }
+
+    fn compute_grad(&self, grad: &[DType], results: &mut [Vec<DType>]) {
+        results[0].iter_mut().zip(grad.iter()).for_each(|(oi, gi)| {
+            *oi = -*gi;
+        });
+    }
+}
+
+
 
 #[cfg(test)]
 mod tests {
@@ -399,6 +598,29 @@ mod tests {
         let y = Variable::new(vec![2., 3., 3.]);
         let res = Power::new(x, y);
         assert_eq!(res.value(), &[0., 1., 8.]);
+    }
+
+    #[test]
+    fn test_exp() {
+        let x = Variable::new(vec![0., 1., 2.]);
+        let out = (&x).exp();
+        let mut graph = Graph::new();
+        graph.backward(&out);
+        let grad = graph.get_grad(&x);
+        assert_eq!(out.value(), &[1., 1f32.exp(), 2f32.exp()]);
+    }
+
+    #[test]
+    fn test_neg_exp() {
+        let x = Variable::new(vec![0., 1., 2.]);
+        let nx = -&x;
+        let enx = nx.exp();
+        let out = enx;
+        let mut graph = Graph::new();
+        graph.backward(&out);
+
+        let grad = graph.get_grad(&x).unwrap();
+        assert_eq!(grad, &[-1., -(-1f32).exp(), -(-2f32).exp()]);
     }
 
     #[test]
@@ -538,4 +760,36 @@ mod tests {
         let x_grad = graph.get_grad(&x);
         assert_eq!(Some(&vec![4f32]), x_grad);
     }
+
+    #[test]
+    fn test_sigmoid_denom() {
+        // e ^ -x
+        let x      = Variable::new(vec![1f32]);
+        let res = &(-&x).exp();
+        assert_eq!(res.value(), vec![(-1f32).exp()]);
+
+        let mut graph = Graph::new();
+        graph.backward(&res);
+
+        let x_grad = graph.get_grad(&x);
+        let x_0 = res.value()[0];
+        let expected = -(-1f32).exp();
+        assert_eq!(Some(&vec![expected]), x_grad);
+    }
+
+    #[test]
+    fn test_logistic() {
+        // 1 / (1 + e ^ -x)
+        let x = Variable::new(vec![0f32]);
+        let res = 1f32 / &(&(-&x).exp() + 1f32);
+        assert_eq!(res.value(), vec![0.5]);
+
+        let mut graph = Graph::new();
+        graph.backward(&res);
+
+        let x_grad = graph.get_grad(&x);
+        let sigma_trick = res.value()[0] * (1f32 - res.value()[0]);
+        assert_eq!(Some(&vec![sigma_trick]), x_grad);
+    }
+
 }

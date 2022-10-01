@@ -1,6 +1,7 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
-use crate::{DType,ANode,NodeIdx};
+use crate::{DType,ANode,NodeIdx,Node};
 use crate::vecops::iadd;
 
 #[derive(Debug)]
@@ -18,11 +19,12 @@ impl Graph {
     }
 
     pub fn backward(&mut self, end_node: &ANode) {
+        let out = Run::new(end_node);
         // dz/dz of course is 1
-        let mut z_grad = self.get_or_create_grad(end_node);
+        let mut z_grad = self.get_or_create_grad(&out);
         z_grad.fill(1f32);
-        self.add_grad(end_node, z_grad);
-        self.recurse(end_node);
+        self.add_grad(&out, z_grad);
+        self.recurse(&out);
     }
 
     pub fn get_grad(&self, node: &ANode) -> Option<&Vec<DType>> {
@@ -96,10 +98,15 @@ impl Graph {
                     self.add_grad(c, g);
                 });
 
+                self.add_grad(node, node_grad);
+
                 // Run children
                 for child in children.iter() {
                     self.recurse(child);
                 }
+
+            } else {
+                self.add_grad(node, node_grad);
             }
         }
     }
@@ -107,4 +114,33 @@ impl Graph {
 
 }
 
+pub(crate) struct Run(NodeIdx, Vec<ANode>);
+
+impl Run {
+    pub(crate) fn new(x: &ANode) -> ANode {
+        let idx = NodeIdx::new();
+        ANode::new(Arc::new(Run(idx, vec![x.clone()])))
+    }
+}
+
+impl Node for Run {
+    fn get_id(&self) -> NodeIdx { self.0.clone() }
+
+    fn get_children(&self) -> Option<&[ANode]> { 
+        Some(&self.1)
+    }
+
+    fn is_leaf(&self) -> bool { false }
+
+    fn value(&self) -> &[DType] {
+        &self.1[0].value()
+    }
+
+    fn requires_grad(&self) -> bool { false }
+
+    fn compute_grad(&self, grad: &[DType], results: &mut [Vec<DType>]) {
+        let mut out = &mut results[0];
+        out.fill(1f32);
+    }
+}
 

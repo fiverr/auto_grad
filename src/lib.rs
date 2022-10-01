@@ -7,7 +7,7 @@ pub use ops::{Variable,Constant};
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::ops::{Add,Sub,Mul,Div,Deref};
+use std::ops::{Add,Sub,Mul,Div,Deref,Neg};
 
 use crate::ops::*;
 
@@ -51,8 +51,24 @@ impl ANode {
     pub fn dot(&self, other: &ANode) -> ANode {
         SumVec::new(self * other)
     }
-}
 
+    pub fn ln(&self) -> ANode {
+        Ln::new(self.clone())
+    }
+
+    pub fn cos(&self) -> ANode {
+        Cos::new(self.clone())
+    }
+
+    pub fn sin(&self) -> ANode {
+        Cos::new(self.clone())
+    }
+
+    pub fn exp(&self) -> ANode {
+        Exp::new(self.clone())
+    }
+
+}
 
 impl Deref for ANode {
     type Target = Arc<dyn Node>;
@@ -81,6 +97,12 @@ impl Add<f32> for &ANode {
     }
 }
 
+impl Add<&ANode> for f32 {
+    type Output = ANode;
+    fn add(self, rhs: &ANode) -> Self::Output {
+        rhs + self
+    }
+}
 
 impl Sub for &ANode {
     type Output = ANode;
@@ -93,6 +115,13 @@ impl Sub<f32> for &ANode {
     type Output = ANode;
     fn sub(self, rhs: f32) -> Self::Output {
         Subtract::new(self.clone(), Constant::scalar(rhs))
+    }
+}
+
+impl Sub<&ANode> for f32 {
+    type Output = ANode;
+    fn sub(self, rhs: &ANode) -> Self::Output {
+        &Constant::scalar(self) - rhs
     }
 }
 
@@ -110,6 +139,12 @@ impl Mul<f32> for &ANode {
     }
 }
 
+impl Mul<&ANode> for f32 {
+    type Output = ANode;
+    fn mul(self, rhs: &ANode) -> Self::Output {
+        rhs * self
+    }
+}
 
 impl Div for &ANode {
     type Output = ANode;
@@ -122,6 +157,20 @@ impl Div<f32> for &ANode {
     type Output = ANode;
     fn div(self, rhs: f32) -> Self::Output {
         Divide::new(self.clone(), Constant::scalar(rhs))
+    }
+}
+
+impl Div<&ANode> for f32 {
+    type Output = ANode;
+    fn div(self, rhs: &ANode) -> Self::Output {
+        &Constant::scalar(self) / rhs
+    }
+}
+
+impl Neg for &ANode {
+    type Output = ANode;
+    fn neg(self) -> Self::Output {
+        Negate::new(self.clone())
     }
 }
 
