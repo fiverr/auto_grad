@@ -72,7 +72,6 @@ impl Graph {
     }
     
     fn recurse(&mut self, node: &ANode) {
-        println!("\nProcessing {:?}", node.get_id());
         if !node.is_leaf() {
             let node_grad = self.get_or_create_grad(node);
             if let Some(children) = node.get_children() {
@@ -81,17 +80,11 @@ impl Graph {
                     .map(|c| self.get_or_create_grad(c))
                     .collect();
 
-                println!("Children ids => {:?}", children.iter().map(|c| c.get_id()).collect::<Vec<_>>());
-
                 let mut temp_grads: Vec<_> = grads.iter()
                     .map(|g| self.get_temp_space(g.len()))
                     .collect();
 
-                println!("parent grad: {:?}", node_grad);
-                println!("child grads: {:?}", grads);
-                println!("temp grads: {:?}", temp_grads);
                 node.compute_grad(&node_grad, &mut temp_grads);
-                println!("temp grads after: {:?}", temp_grads);
 
                 // Update grads
                 grads.iter_mut().zip(temp_grads.into_iter()).for_each(|(g, tg)| {
@@ -101,7 +94,6 @@ impl Graph {
 
                 // Re-add gradients
                 children.iter().zip(grads.into_iter()).for_each(|(c, g)| {
-                    println!("Re-adding {:?} for {:?}", g, c.get_id());
                     self.add_grad(c, g);
                 });
 

@@ -1016,33 +1016,25 @@ mod tests {
         let y = Constant::new(vec![3f32,-4f32]);
         let mut v = vec![0f32, 0f32]; 
         let mut graph = Graph::new();
-        for p in 0..1 {
-            println!("pass {}, x: {:?}", p, v);
-
+        for p in 0..100 {
             let x = Variable::new(v.clone());
             let c = Constant::scalar(2f32);
             let y1 = &x - &y;
             let y2 = (&y1).pow(&c);
-            let res = (&y2).sum();
-            println!("x => {:?}", x.get_id());
-            println!("y => {:?}", y.get_id());
-            println!("2 => {:?}", c.get_id());
-            println!("x - y => {:?}", y1.get_id());
-            println!("^ 2 => {:?}", y2.get_id());
-            println!("sum() => {:?}", res.get_id());
-
-            println!("Error: {}", res.value()[0]);
-
-            graph.backward(&res);
+            let err = (&y2).sum();
+            println!("Error: {}", err.value()[0]);
+            graph.backward(&err);
             let x_grad = graph.get_grad(&x).unwrap();
-            println!("x grad: {:?}", x_grad);
             
             // SGD!
             v.iter_mut().zip(x_grad.iter()).for_each(|(vi, gi)| {
                 *vi -= 1e-1 * *gi;
             });
+            println!("X: {:?}", v);
         }
-        panic!();
+
+        assert!((v[0] - y.value()[0]).abs() < 1e-5);
+        assert!((v[1] - y.value()[1]).abs() < 1e-5);
     }
 
 }
