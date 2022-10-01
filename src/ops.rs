@@ -1,5 +1,5 @@
 use crate::*;
-use crate::vecops::{add, sub, isub, mul, imul, div};
+use crate::vecops::{add, iadd, sub, isub, mul, imul, div};
 
 #[derive(Clone)]
 struct Computation {
@@ -553,6 +553,49 @@ impl Node for Negate {
     }
 }
 
+pub(crate) struct BulkSum(NodeIdx, Vec<ANode>, Computation);
+
+impl BulkSum {
+    pub(crate) fn new(vecs: impl Iterator<Item=ANode>) -> ANode {
+        let idx = NodeIdx::new();
+        let children: Vec<_> = vecs.collect();
+        let value = BulkSum::compute(&children);
+        let node  = BulkSum(idx, children, Computation::new(value));
+        ANode::new(Arc::new(node))
+    }
+
+    fn compute(xs: &[ANode]) -> Vec<DType> {
+        let mut agg = vec![0.; xs[0].value().len()];
+        for x in xs {
+            iadd(&mut agg, x.value());
+        }
+        agg
+    }
+}
+
+impl Node for BulkSum {
+    fn get_id(&self) -> NodeIdx { self.0.clone() }
+
+    fn get_children(&self) -> Option<&[ANode]> { 
+        Some(self.1.as_slice())
+    }
+
+    fn is_leaf(&self) -> bool { false }
+
+    fn value(&self) -> &[DType] {
+        &self.2.value
+    }
+
+    fn requires_grad(&self) -> bool { false }
+
+    fn compute_grad(&self, grad: &[DType], results: &mut [Vec<DType>]) {
+        // Just the gradient for each, easy peasy
+        let x = self.value();
+        for out in results.iter_mut() {
+            out.clone_from_slice(grad);
+        }
+    }
+}
 
 
 #[cfg(test)]
@@ -751,7 +794,7 @@ mod tests {
     fn test_composition() {
         // (x+2) ^ 2 
         let x      = Variable::new(vec![0f32]);
-        let res = (&x + 2f32).powf(2f32);
+        let res = (&x + 2f32).pow(2f32);
         assert_eq!(res.value(), vec![4f32]);
 
         let mut graph = Graph::new();

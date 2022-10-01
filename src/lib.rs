@@ -1,3 +1,7 @@
+//#![feature(trace_macros)]
+
+//trace_macros!(true);
+
 mod graph;
 mod vecops;
 mod ops;
@@ -70,6 +74,27 @@ impl ANode {
 
 }
 
+trait FromConstant {
+    fn convert(self) -> ANode; 
+}
+
+impl FromConstant for f32 {
+    fn convert(self) -> ANode {
+        Constant::scalar(self)
+    }
+}
+
+impl FromConstant for Vec<f32> {
+    fn convert(self) -> ANode {
+        Constant::new(self)
+    }
+}
+
+trait Pow<Rhs=Self> {
+    type Output;
+    fn pow(self, rhs: Rhs) -> Self::Output;
+}
+
 impl Deref for ANode {
     type Target = Arc<dyn Node>;
 
@@ -78,114 +103,200 @@ impl Deref for ANode {
     }
 }
 
-trait Pow<Rhs=Self> {
-    type Output;
-    fn powf(self, rhs: Rhs) -> Self::Output;
+macro_rules! forward_ref_binop {
+    (impl $imp:ident, $method:ident for $t:ty, $u:ty) => {
+        impl<'a> $imp<$u> for &'a $t {
+            type Output = <$t as $imp<$u>>::Output;
+
+            #[inline]
+            fn $method(self, other: $u) -> <$t as $imp<$u>>::Output {
+                $imp::$method(self.clone(), other)
+            }
+        }
+
+        impl $imp<&$u> for $t {
+            type Output = <$t as $imp<$u>>::Output;
+
+            #[inline]
+            fn $method(self, other: &$u) -> <$t as $imp<$u>>::Output {
+                $imp::$method(self, other.clone())
+            }
+        }
+
+        impl $imp<&$u> for &$t {
+            type Output = <$t as $imp<$u>>::Output;
+
+            #[inline]
+            fn $method(self, other: &$u) -> <$t as $imp<$u>>::Output {
+                $imp::$method(self.clone(), other.clone())
+            }
+        }
+
+
+    };
 }
 
-impl Add for &ANode {
+macro_rules! convert_binops {
+    (impl $imp:ident, $method:ident for $t:ty, $u:ty) => {
+        impl <C: FromConstant> $imp<C> for $t {
+            type Output = <$t as $imp<$u>>::Output;
+            //type Output = ANode;
+            fn $method(self, other: C) -> <$t as $imp<$u>>::Output {
+                $imp::$method(self, other.convert())
+            }
+        }
+
+        impl <C: FromConstant> $imp<C> for &$t {
+            type Output = <$t as $imp<$u>>::Output;
+            //type Output = ANode;
+            fn $method(self, other: C) -> <$t as $imp<$u>>::Output {
+                $imp::$method(self.clone(), other.convert())
+            }
+        }
+    };
+}
+
+impl Add for ANode {
     type Output = ANode;
-    fn add(self, rhs: &ANode) -> Self::Output {
-        AddN::new(self.clone(), rhs.clone())
+    fn add(self, rhs: ANode) -> Self::Output {
+        AddN::new(self, rhs)
     }
 }
 
-impl Add<f32> for &ANode {
+impl Add<ANode> for f32 {
     type Output = ANode;
-    fn add(self, rhs: f32) -> Self::Output {
-        AddN::new(self.clone(), Constant::scalar(rhs))
+    fn add(self, rhs: ANode) -> Self::Output {
+        rhs + self.convert()
     }
 }
 
-impl Add<&ANode> for f32 {
+impl Add<ANode> for Vec<f32> {
     type Output = ANode;
-    fn add(self, rhs: &ANode) -> Self::Output {
-        rhs + self
+    fn add(self, rhs: ANode) -> Self::Output {
+        rhs + self.convert()
     }
 }
 
-impl Sub for &ANode {
+convert_binops! { impl Add, add for ANode, ANode }
+forward_ref_binop! { impl Add, add for ANode, ANode }
+forward_ref_binop! { impl Add, add for f32, ANode }
+forward_ref_binop! { impl Add, add for Vec<f32>, ANode }
+
+impl Sub for ANode {
     type Output = ANode;
-    fn sub(self, rhs: &ANode) -> Self::Output {
-        Subtract::new(self.clone(), rhs.clone())
+    fn sub(self, rhs: ANode) -> Self::Output {
+        Subtract::new(self, rhs)
     }
 }
 
-impl Sub<f32> for &ANode {
+impl Sub<ANode> for f32 {
     type Output = ANode;
-    fn sub(self, rhs: f32) -> Self::Output {
-        Subtract::new(self.clone(), Constant::scalar(rhs))
+    fn sub(self, rhs: ANode) -> Self::Output {
+        self.convert() - rhs
     }
 }
 
-impl Sub<&ANode> for f32 {
+impl Sub<ANode> for Vec<f32> {
     type Output = ANode;
-    fn sub(self, rhs: &ANode) -> Self::Output {
-        &Constant::scalar(self) - rhs
+    fn sub(self, rhs: ANode) -> Self::Output {
+        self.convert() - rhs
     }
 }
 
-impl Mul for &ANode {
+convert_binops! { impl Sub, sub for ANode, ANode }
+forward_ref_binop! { impl Sub, sub for ANode, ANode }
+forward_ref_binop! { impl Sub, sub for f32, ANode }
+forward_ref_binop! { impl Sub, sub for Vec<f32>, ANode }
+
+impl Mul for ANode {
     type Output = ANode;
-    fn mul(self, rhs: &ANode) -> Self::Output {
-        Multiply::new(self.clone(), rhs.clone())
+    fn mul(self, rhs: ANode) -> Self::Output {
+        Multiply::new(self, rhs)
     }
 }
 
-impl Mul<f32> for &ANode {
+impl Mul<ANode> for f32 {
     type Output = ANode;
-    fn mul(self, rhs: f32) -> Self::Output {
-        Multiply::new(self.clone(), Constant::scalar(rhs))
+    fn mul(self, rhs: ANode) -> Self::Output {
+        self.convert() * rhs
     }
 }
 
-impl Mul<&ANode> for f32 {
+impl Mul<ANode> for Vec<f32> {
     type Output = ANode;
-    fn mul(self, rhs: &ANode) -> Self::Output {
-        rhs * self
+    fn mul(self, rhs: ANode) -> Self::Output {
+        self.convert() * rhs
     }
 }
 
-impl Div for &ANode {
+convert_binops! {    impl Mul, mul for ANode, ANode }
+forward_ref_binop! { impl Mul, mul for ANode, ANode }
+forward_ref_binop! { impl Mul, mul for f32, ANode }
+forward_ref_binop! { impl Mul, mul for Vec<f32>, ANode }
+
+impl Div for ANode {
     type Output = ANode;
-    fn div(self, rhs: &ANode) -> Self::Output {
-        Divide::new(self.clone(), rhs.clone())
+    fn div(self, rhs: ANode) -> Self::Output {
+        Divide::new(self, rhs)
     }
 }
 
-impl Div<f32> for &ANode {
+impl Div<ANode> for f32 {
     type Output = ANode;
-    fn div(self, rhs: f32) -> Self::Output {
-        Divide::new(self.clone(), Constant::scalar(rhs))
+    fn div(self, rhs: ANode) -> Self::Output {
+        self.convert() / rhs
     }
 }
 
-impl Div<&ANode> for f32 {
+impl Div<ANode> for Vec<f32> {
     type Output = ANode;
-    fn div(self, rhs: &ANode) -> Self::Output {
-        &Constant::scalar(self) / rhs
+    fn div(self, rhs: ANode) -> Self::Output {
+        self.convert() / rhs
+    }
+}
+
+convert_binops!    { impl Div, div for ANode, ANode }
+forward_ref_binop! { impl Div, div for ANode, ANode }
+forward_ref_binop! { impl Div, div for f32, ANode }
+forward_ref_binop! { impl Div, div for Vec<f32>, ANode }
+
+impl Neg for ANode {
+    type Output = ANode;
+    fn neg(self) -> Self::Output {
+        Negate::new(self)
     }
 }
 
 impl Neg for &ANode {
     type Output = ANode;
     fn neg(self) -> Self::Output {
-        Negate::new(self.clone())
+        -self.clone()
     }
 }
 
-impl Pow for &ANode {
+impl Pow for ANode {
     type Output = ANode;
-    fn powf(self, rhs: &ANode) -> Self::Output {
-        Power::new(self.clone(), rhs.clone())
+    fn pow(self, rhs: ANode) -> Self::Output {
+        Power::new(self, rhs)
     }
 }
 
-impl Pow<f32> for &ANode {
+impl Pow<ANode> for f32 {
     type Output = ANode;
-    fn powf(self, rhs: f32) -> Self::Output {
-        Power::new(self.clone(), Constant::scalar(rhs))
+    fn pow(self, rhs: ANode) -> Self::Output {
+        self.convert().pow(rhs)
     }
 }
 
+impl Pow<ANode> for Vec<f32> {
+    type Output = ANode;
+    fn pow(self, rhs: ANode) -> Self::Output {
+        self.convert().pow(rhs)
+    }
+}
+
+convert_binops!    { impl Pow, pow for ANode, ANode }
+forward_ref_binop! { impl Pow, pow for ANode, ANode }
+forward_ref_binop! { impl Pow, pow for f32, ANode }
+forward_ref_binop! { impl Pow, pow for Vec<f32>, ANode }
 
