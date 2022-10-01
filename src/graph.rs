@@ -43,7 +43,6 @@ impl Graph {
         self.freelist.clear();
     }
 
-
     fn get_or_create_grad(&mut self, node: &ANode) -> Vec<DType> {
         let n_idx = node.get_id();
         if self.gradients.contains_key(&n_idx)  {
@@ -98,7 +97,11 @@ impl Graph {
                     self.add_grad(c, g);
                 });
 
-                self.add_grad(node, node_grad);
+                if node.requires_grad() {
+                    self.add_grad(node, node_grad);
+                } else {
+                    self.ret_temp_space(node_grad);
+                }
 
                 // Run children
                 for child in children.iter() {
