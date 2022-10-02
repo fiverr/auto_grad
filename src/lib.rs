@@ -306,3 +306,26 @@ forward_ref_binop! { impl Pow, pow for ANode, ANode }
 forward_ref_binop! { impl Pow, pow for f32, ANode }
 forward_ref_binop! { impl Pow, pow for Vec<f32>, ANode }
 
+pub trait BulkOps {
+    fn sum_all(self) -> ANode;
+}
+
+/*
+impl BulkOps for Vec<ANode> {
+    fn sum_all(self) -> ANode {
+        BulkSum::new(self.into_iter())
+    }
+}
+
+impl BulkOps for Vec<&ANode> {
+    fn sum_all(self) -> ANode {
+        BulkSum::new(self.into_iter().cloned())
+    }
+}
+*/
+
+impl <I: Iterator<Item=ANode>> BulkOps for I {
+    fn sum_all(self) -> ANode {
+        BulkSum::new(self)
+    }
+}
