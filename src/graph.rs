@@ -31,7 +31,7 @@ impl Graph {
         self.gradients.get(&node.get_id())
     }
 
-    pub fn clear_grads(&mut self) {
+    pub fn zero_grads(&mut self) {
         let mut hm = HashMap::new();
         std::mem::swap(&mut hm, &mut self.gradients);
         hm.into_values()

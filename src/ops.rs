@@ -1078,19 +1078,21 @@ mod tests {
         let y = Constant::new(vec![3f32,-4f32]);
         let mut v = vec![0f32, 0f32]; 
         let mut graph = Graph::new();
-        for p in 0..100 {
+        let alpha = 3e-1;
+        for _ in 0..20 {
             let x = Variable::new(v.clone());
             let c = Constant::scalar(2f32);
             let y1 = &x - &y;
             let y2 = (&y1).pow(&c);
             let err = (&y2).sum();
             println!("Error: {}", err.value()[0]);
+            graph.zero_grads();
             graph.backward(&err);
             let x_grad = graph.get_grad(&x).unwrap();
             
             // SGD!
             v.iter_mut().zip(x_grad.iter()).for_each(|(vi, gi)| {
-                *vi -= 1e-1 * *gi;
+                *vi -= alpha * *gi;
             });
             println!("X: {:?}", v);
         }
@@ -1099,7 +1101,7 @@ mod tests {
         assert!((v[1] - y.value()[1]).abs() < 1e-5);
     }
 
-   #[test]
+    #[test]
     fn test_updateable() {
         let mut v = Arc::new(vec![0f32, 0f32]);
         let mut graph = Graph::new();
