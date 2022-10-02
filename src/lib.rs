@@ -310,7 +310,6 @@ pub trait BulkOps {
     fn sum_all(self) -> ANode;
 }
 
-/*
 impl BulkOps for Vec<ANode> {
     fn sum_all(self) -> ANode {
         BulkSum::new(self.into_iter())
@@ -322,10 +321,4 @@ impl BulkOps for Vec<&ANode> {
         BulkSum::new(self.into_iter().cloned())
     }
 }
-*/
 
-impl <I: Iterator<Item=ANode>> BulkOps for I {
-    fn sum_all(self) -> ANode {
-        BulkSum::new(self)
-    }
-}
