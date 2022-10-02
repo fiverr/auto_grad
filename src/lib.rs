@@ -96,7 +96,7 @@ impl FromConstant for Vec<f32> {
     }
 }
 
-trait Pow<Rhs=Self> {
+pub trait Pow<Rhs=Self> {
     type Output;
     fn pow(self, rhs: Rhs) -> Self::Output;
 }
