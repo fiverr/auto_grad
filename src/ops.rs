@@ -1,29 +1,58 @@
+use std::sync::Arc;
+
 use crate::*;
 use crate::vecops::{add, iadd, sub, isub, mul, imul, div};
+use crate::pool::{MPVec,allocate_vec};
 
-#[derive(Clone)]
-struct Computation {
-    value: Vec<DType>
+enum Data {
+    Owned(Vec<DType>),
+    Shared(Arc<Vec<DType>>),
+    Pooled(MPVec)
 }
 
-#[derive(Clone)]
-pub struct Variable(NodeIdx, Computation);
+struct Computation {
+    value: Data
+}
 
 impl Computation {
     fn new(value: Vec<DType>) -> Self {
-        Computation { value: value }
+        Computation { value: Data::Owned(value) }
+    }
+
+    fn shared(value: Arc<Vec<DType>>) -> Self {
+        Computation { value: Data::Shared(value) }
+    }
+
+    fn pooled(value: MPVec) -> Self {
+        Computation { value: Data::Pooled(value) }
+    }
+
+    fn get(&self) -> &[DType] {
+        match &self.value {
+            Data::Owned(v) => &v,
+            Data::Shared(v) => &v,
+            Data::Pooled(v) => v.as_ref().as_slice()
+        }
     }
 }
 
+pub struct Variable(NodeIdx, Computation);
 
 impl Variable {
     pub fn new(value: Vec<DType>) -> ANode {
         let v = Variable(NodeIdx::new(), Computation::new(value));
         ANode::new(Arc::new(v))
     }
+
     pub fn scalar(value: DType) -> ANode {
         Variable::new(vec![value])
     }
+    
+    pub fn shared(value: Arc<Vec<DType>>) -> ANode {
+        let v = Variable(NodeIdx::new(), Computation::shared(value));
+        ANode::new(Arc::new(v))
+    }
+
 }
 
 impl Node for Variable {
@@ -32,7 +61,7 @@ impl Node for Variable {
     fn is_leaf(&self) -> bool { true }
 
     fn value(&self) -> &[DType] {
-        &self.1.value
+        &self.1.get()
     }
 
     fn get_children(&self) -> Option<&[ANode]> { None }
@@ -44,7 +73,6 @@ impl Node for Variable {
     }
 }
 
-#[derive(Clone)]
 pub struct Constant(NodeIdx, Computation);
 
 impl Constant {
@@ -54,11 +82,10 @@ impl Constant {
     }
 
     pub fn scalar(value: DType) -> ANode {
-        Constant::new(vec![value])
-    }
-
-    pub fn broadcast(value: DType, size: usize) -> ANode {
-        Constant::new(vec![value; size])
+        let mut v = allocate_vec(1);
+        v.as_mut()[0] = value;
+        let c = Constant(NodeIdx::new(), Computation::pooled(v));
+        ANode::new(Arc::new(c))
     }
 
 }
@@ -71,7 +98,7 @@ impl Node for Constant {
     fn is_leaf(&self) -> bool { true }
 
     fn value(&self) -> &[DType] {
-        &self.1.value
+        &self.1.get()
     }
 
     fn requires_grad(&self) -> bool { false }
@@ -154,13 +181,17 @@ impl AddN {
     pub(crate) fn new(left: ANode, right: ANode) -> ANode {
         let idx = NodeIdx::new();
         let value = AddN::compute(&left, &right);
-        let node = AddN(idx, vec![left, right], Computation::new(value));
+        let node = AddN(idx, vec![left, right], Computation::pooled(value));
         ANode::new(Arc::new(node))
     }
 
-    fn compute(left: &ANode, right: &ANode) -> Vec<DType> {
+    fn compute(left: &ANode, right: &ANode) -> MPVec {
         let (lv, rv) = Broadcast::from_pair(left.value(), right.value());
-        lv.zip(rv).map(|(lvi, rvi)| lvi + rvi).collect()
+        let mut out = allocate_vec(lv.len);
+        out.iter_mut().zip(lv.zip(rv)).for_each(|(oi, (lvi, rvi))| {
+            *oi = lvi + rvi
+        });
+        out
     }
 }
 
@@ -174,7 +205,7 @@ impl Node for AddN {
     fn is_leaf(&self) -> bool { false }
 
     fn value(&self) -> &[DType] {
-        &self.2.value
+        &self.2.get()
     }
 
     fn requires_grad(&self) -> bool { false }
@@ -184,7 +215,7 @@ impl Node for AddN {
         // df(x,y)/dx = 1
         // df(x,y)/dy = 1
         for out in child_grads.iter_mut() {
-            let mut it  = Broadcast::sized(grad, out.len());
+            let it  = Broadcast::sized(grad, out.len());
             let mut agg = Updater::new(out, grad.len());
             it.for_each(|gi| agg.add(*gi));
         }
@@ -198,13 +229,17 @@ impl Subtract {
     pub(crate) fn new(left: ANode, right: ANode) -> ANode {
         let idx = NodeIdx::new();
         let value = Subtract::compute(&left, &right);
-        let node = Subtract(idx, vec![left, right], Computation::new(value));
+        let node = Subtract(idx, vec![left, right], Computation::pooled(value));
         ANode::new(Arc::new(node))
     }
 
-    fn compute(left: &ANode, right: &ANode) -> Vec<DType> {
+    fn compute(left: &ANode, right: &ANode) -> MPVec {
         let (lv, rv) = Broadcast::from_pair(left.value(), right.value());
-        lv.zip(rv).map(|(lvi, rvi)| lvi - rvi).collect()
+        let mut out = allocate_vec(lv.len);
+        out.iter_mut().zip(lv.zip(rv)).for_each(|(oi, (lvi, rvi))| {
+            *oi = lvi - rvi
+        });
+        out
     }
 }
 
@@ -218,7 +253,7 @@ impl Node for Subtract {
     fn is_leaf(&self) -> bool { false }
 
     fn value(&self) -> &[DType] {
-        &self.2.value
+        &self.2.get()
     }
 
     fn requires_grad(&self) -> bool { false }
@@ -242,13 +277,17 @@ impl Multiply {
     pub(crate) fn new(left: ANode, right: ANode) -> ANode {
         let idx = NodeIdx::new();
         let value = Multiply::compute(&left, &right);
-        let node = Multiply(idx, vec![left, right], Computation::new(value));
+        let node = Multiply(idx, vec![left, right], Computation::pooled(value));
         ANode::new(Arc::new(node))
     }
 
-    fn compute(left: &ANode, right: &ANode) -> Vec<DType> {
+    fn compute(left: &ANode, right: &ANode) -> MPVec {
         let (lv, rv) = Broadcast::from_pair(left.value(), right.value());
-        lv.zip(rv).map(|(lvi, rvi)| lvi * rvi).collect()
+        let mut out = allocate_vec(lv.len);
+        out.iter_mut().zip(lv.zip(rv)).for_each(|(oi, (lvi, rvi))| {
+            *oi = lvi * rvi
+        });
+        out
     }
 }
 
@@ -262,7 +301,7 @@ impl Node for Multiply {
     fn is_leaf(&self) -> bool { false }
 
     fn value(&self) -> &[DType] {
-        &self.2.value
+        &self.2.get()
     }
 
     fn requires_grad(&self) -> bool { false }
@@ -293,13 +332,17 @@ impl Divide {
     pub(crate) fn new(left: ANode, right: ANode) -> ANode {
         let idx = NodeIdx::new();
         let value = Divide::compute(&left, &right);
-        let node = Divide(idx, vec![left, right], Computation::new(value));
+        let node = Divide(idx, vec![left, right], Computation::pooled(value));
         ANode::new(Arc::new(node))
     }
 
-    fn compute(left: &ANode, right: &ANode) -> Vec<DType> {
+    fn compute(left: &ANode, right: &ANode) -> MPVec {
         let (lv, rv) = Broadcast::from_pair(left.value(), right.value());
-        lv.zip(rv).map(|(lvi, rvi)| lvi / rvi).collect()
+        let mut out = allocate_vec(lv.len);
+        out.iter_mut().zip(lv.zip(rv)).for_each(|(oi, (lvi, rvi))| {
+            *oi = lvi / rvi
+        });
+        out
     }
 }
 
@@ -313,7 +356,7 @@ impl Node for Divide {
     fn is_leaf(&self) -> bool { false }
 
     fn value(&self) -> &[DType] {
-        &self.2.value
+        &self.2.get()
     }
 
     fn requires_grad(&self) -> bool { false }
@@ -342,13 +385,17 @@ impl Power {
     pub(crate) fn new(base: ANode, exp: ANode) -> ANode {
         let idx = NodeIdx::new();
         let value = Power::compute(&base, &exp);
-        let node = Power(idx, vec![base, exp], Computation::new(value));
+        let node = Power(idx, vec![base, exp], Computation::pooled(value));
         ANode::new(Arc::new(node))
     }
 
-    fn compute(left: &ANode, right: &ANode) -> Vec<DType> {
+    fn compute(left: &ANode, right: &ANode) -> MPVec {
         let (lv, rv) = Broadcast::from_pair(left.value(), right.value());
-        lv.zip(rv).map(|(lvi, rvi)| lvi.powf(*rvi)).collect()
+        let mut out = allocate_vec(lv.len);
+        out.iter_mut().zip(lv.zip(rv)).for_each(|(oi, (lvi, rvi))| {
+            *oi = lvi.powf(*rvi)
+        });
+        out
     }
 }
 
@@ -362,7 +409,7 @@ impl Node for Power {
     fn is_leaf(&self) -> bool { false }
 
     fn value(&self) -> &[DType] {
-        &self.2.value
+        &self.2.get()
     }
 
     fn requires_grad(&self) -> bool { false }
@@ -397,13 +444,15 @@ impl SumVec {
     pub(crate) fn new(vec: ANode) -> ANode {
         let idx = NodeIdx::new();
         let value = SumVec::compute(&vec);
-        let node = SumVec(idx, vec![vec], Computation::new(value));
+        let node = SumVec(idx, vec![vec], Computation::pooled(value));
         ANode::new(Arc::new(node))
     }
 
-    fn compute(left: &ANode) -> Vec<DType> {
+    fn compute(left: &ANode) -> MPVec {
         let lv = left.value();
-        vec![lv.iter().sum::<f32>()]
+        let mut out = allocate_vec(1);
+        out[0] = lv.iter().sum::<f32>();
+        out
     }
 }
 
@@ -417,7 +466,7 @@ impl Node for SumVec {
     fn is_leaf(&self) -> bool { false }
 
     fn value(&self) -> &[DType] {
-        &self.2.value
+        &self.2.get()
     }
 
     fn requires_grad(&self) -> bool { false }
@@ -437,13 +486,15 @@ impl Cos {
     pub(crate) fn new(vec: ANode) -> ANode {
         let idx = NodeIdx::new();
         let value = Cos::compute(&vec);
-        let node = Cos(idx, vec![vec], Computation::new(value));
+        let node = Cos(idx, vec![vec], Computation::pooled(value));
         ANode::new(Arc::new(node))
     }
 
-    fn compute(left: &ANode) -> Vec<DType> {
+    fn compute(left: &ANode) -> MPVec {
         let lv = left.value();
-        lv.iter().map(|lvi| lvi.cos()).collect()
+        let mut out = allocate_vec(lv.len());
+        out.iter_mut().zip(lv.iter()).for_each(|(oi, lvi)| *oi = lvi.cos());
+        out
     }
 }
 
@@ -457,7 +508,7 @@ impl Node for Cos {
     fn is_leaf(&self) -> bool { false }
 
     fn value(&self) -> &[DType] {
-        &self.2.value
+        &self.2.get()
     }
 
     fn requires_grad(&self) -> bool { false }
@@ -477,14 +528,17 @@ impl Sin {
     pub(crate) fn new(vec: ANode) -> ANode {
         let idx = NodeIdx::new();
         let value = Sin::compute(&vec);
-        let node = Sin(idx, vec![vec], Computation::new(value));
+        let node = Sin(idx, vec![vec], Computation::pooled(value));
         ANode::new(Arc::new(node))
     }
 
-    fn compute(left: &ANode) -> Vec<DType> {
+    fn compute(left: &ANode) -> MPVec {
         let lv = left.value();
-        lv.iter().map(|lvi| lvi.sin()).collect()
+        let mut out = allocate_vec(lv.len());
+        out.iter_mut().zip(lv.iter()).for_each(|(oi, lvi)| *oi = lvi.sin());
+        out
     }
+
 }
 
 impl Node for Sin {
@@ -497,7 +551,7 @@ impl Node for Sin {
     fn is_leaf(&self) -> bool { false }
 
     fn value(&self) -> &[DType] {
-        &self.2.value
+        &self.2.get()
     }
 
     fn requires_grad(&self) -> bool { false }
@@ -517,13 +571,15 @@ impl Ln {
     pub(crate) fn new(vec: ANode) -> ANode {
         let idx = NodeIdx::new();
         let value = Ln::compute(&vec);
-        let node = Ln(idx, vec![vec], Computation::new(value));
+        let node = Ln(idx, vec![vec], Computation::pooled(value));
         ANode::new(Arc::new(node))
     }
 
-    fn compute(left: &ANode) -> Vec<DType> {
+    fn compute(left: &ANode) -> MPVec {
         let lv = left.value();
-        lv.iter().map(|lvi| lvi.ln()).collect()
+        let mut out = allocate_vec(lv.len());
+        out.iter_mut().zip(lv.iter()).for_each(|(oi, lvi)| *oi = lvi.ln());
+        out
     }
 }
 
@@ -537,7 +593,7 @@ impl Node for Ln {
     fn is_leaf(&self) -> bool { false }
 
     fn value(&self) -> &[DType] {
-        &self.2.value
+        &self.2.get()
     }
 
     fn requires_grad(&self) -> bool { false }
@@ -557,14 +613,17 @@ impl Exp {
     pub(crate) fn new(vec: ANode) -> ANode {
         let idx = NodeIdx::new();
         let value = Exp::compute(&vec);
-        let node = Exp(idx, vec![vec], Computation::new(value));
+        let node = Exp(idx, vec![vec], Computation::pooled(value));
         ANode::new(Arc::new(node))
     }
 
-    fn compute(left: &ANode) -> Vec<DType> {
+    fn compute(left: &ANode) -> MPVec {
         let lv = left.value();
-        lv.iter().map(|lvi| lvi.exp()).collect()
+        let mut out = allocate_vec(lv.len());
+        out.iter_mut().zip(lv.iter()).for_each(|(oi, lvi)| *oi = lvi.exp());
+        out
     }
+
 }
 
 impl Node for Exp {
@@ -577,7 +636,7 @@ impl Node for Exp {
     fn is_leaf(&self) -> bool { false }
 
     fn value(&self) -> &[DType] {
-        &self.2.value
+        &self.2.get()
     }
 
     fn requires_grad(&self) -> bool { false }
@@ -596,14 +655,17 @@ impl Negate {
     pub(crate) fn new(vec: ANode) -> ANode {
         let idx = NodeIdx::new();
         let value = Negate::compute(&vec);
-        let node = Negate(idx, vec![vec], Computation::new(value));
+        let node = Negate(idx, vec![vec], Computation::pooled(value));
         ANode::new(Arc::new(node))
     }
 
-    fn compute(left: &ANode) -> Vec<DType> {
+    fn compute(left: &ANode) -> MPVec {
         let lv = left.value();
-        lv.iter().map(|lvi| -lvi).collect()
+        let mut out = allocate_vec(lv.len());
+        out.iter_mut().zip(lv.iter()).for_each(|(oi, lvi)| *oi = -lvi);
+        out
     }
+
 }
 
 impl Node for Negate {
@@ -616,7 +678,7 @@ impl Node for Negate {
     fn is_leaf(&self) -> bool { false }
 
     fn value(&self) -> &[DType] {
-        &self.2.value
+        &self.2.get()
     }
 
     fn requires_grad(&self) -> bool { false }
@@ -635,12 +697,12 @@ impl BulkSum {
         let idx = NodeIdx::new();
         let children: Vec<_> = vecs.collect();
         let value = BulkSum::compute(&children);
-        let node  = BulkSum(idx, children, Computation::new(value));
+        let node  = BulkSum(idx, children, Computation::pooled(value));
         ANode::new(Arc::new(node))
     }
 
-    fn compute(xs: &[ANode]) -> Vec<DType> {
-        let mut agg = vec![0.; xs[0].value().len()];
+    fn compute(xs: &[ANode]) -> MPVec {
+        let mut agg = allocate_vec(xs[0].value().len());
         for x in xs {
             iadd(&mut agg, x.value());
         }
@@ -658,7 +720,7 @@ impl Node for BulkSum {
     fn is_leaf(&self) -> bool { false }
 
     fn value(&self) -> &[DType] {
-        &self.2.value
+        &self.2.get()
     }
 
     fn requires_grad(&self) -> bool { false }
@@ -1035,6 +1097,20 @@ mod tests {
 
         assert!((v[0] - y.value()[0]).abs() < 1e-5);
         assert!((v[1] - y.value()[1]).abs() < 1e-5);
+    }
+
+   #[test]
+    fn test_updateable() {
+        let mut v = Arc::new(vec![0f32, 0f32]);
+        let mut graph = Graph::new();
+        let grad = {
+            let x = Variable::shared(v.clone());
+            let res = (&x + 3f32).pow(2f32) + 3f32;
+            graph.backward(&res);
+            graph.get_grad(&x)
+        };
+        let v = Arc::get_mut(&mut v).unwrap();
+        assert_eq!(v, &mut [0f32, 0f32]);
     }
 
 }

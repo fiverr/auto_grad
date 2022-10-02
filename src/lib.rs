@@ -5,9 +5,11 @@
 mod graph;
 mod vecops;
 mod ops;
+mod pool;
 
 pub use graph::Graph;
 pub use ops::{Variable,Constant};
+pub use pool::clear_pool;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
