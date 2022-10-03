@@ -9,8 +9,8 @@ use std::ops::{Drop,Deref,DerefMut};
 use crate::DType;
 
 static USE_POOL: AtomicBool = AtomicBool::new(true);
-lazy_static! {
-    static ref POOL: Mutex<MemoryPool> = {
+thread_local! {
+    static POOL: Mutex<MemoryPool> = {
         let m = MemoryPool::new();
         Mutex::new(m)
     };
@@ -49,27 +49,37 @@ pub fn use_shared_pool(use_pool: bool) {
     USE_POOL.store(use_pool, Ordering::SeqCst);
 }
 
+fn should_use_pool() -> bool {
+    USE_POOL.load(Ordering::SeqCst)
+}
+
 pub fn allocate_vec(size: usize) -> MPVec {
-    if USE_POOL.load(Ordering::Relaxed) {
-        let mut pool = POOL.lock()
-            .expect("Error accessing memory pool!");
-        pool.get(size)
+    if should_use_pool() {
+        POOL.with(|p| {
+            let mut pool = p.lock()
+                .expect("Error accessing memory pool!");
+            pool.get(size)
+        })
     } else {
         MPVec(vec![0.; size])
     }
 }
 
 pub fn clear_pool() {
-    let mut pool = POOL.lock()
-        .expect("Error accessing memory pool!");
-    pool.clear();
+    POOL.with(|p| {
+        let mut pool = p.lock()
+            .expect("Error accessing memory pool!");
+        pool.clear();
+    });
 }
 
 fn return_vec(v: Vec<DType>) {
-    if USE_POOL.load(Ordering::Relaxed) {
-        let mut pool = POOL.lock()
-            .expect("Error accessing memory pool!");
-        pool.ret(v);
+    if should_use_pool() {
+        POOL.with(|p| {
+            let mut pool = p.lock()
+                .expect("Error accessing memory pool!");
+            pool.ret(v);
+        });
     }
 }
 
