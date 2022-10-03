@@ -9,7 +9,7 @@ mod pool;
 
 pub use graph::Graph;
 pub use ops::{Variable,Constant};
-pub use pool::clear_pool;
+pub use pool::{clear_pool, use_shared_pool};
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;

@@ -7,15 +7,21 @@ use crate::vecops::iadd;
 #[derive(Debug)]
 pub struct Graph {
     gradients: HashMap<NodeIdx, Vec<DType>>,
-    freelist: HashMap<usize, Vec<Vec<DType>>>
+    freelist: HashMap<usize, Vec<Vec<DType>>>,
+    nan_check: bool
 }
 
 impl Graph {
     pub fn new() -> Self {
         Graph {
             gradients: HashMap::new(),
-            freelist: HashMap::new()
+            freelist: HashMap::new(),
+            nan_check: false
         }
+    }
+
+    pub fn debug_nan(&mut self, check: bool)  {
+        self.nan_check = check;
     }
 
     pub fn backward(&mut self, end_node: &ANode) {
@@ -85,6 +91,17 @@ impl Graph {
                     .collect();
 
                 node.compute_grad(&node_grad, &mut temp_grads);
+
+                if self.nan_check {
+                    for (i, grad) in temp_grads.iter().enumerate() {
+                        for gi in grad.iter() {
+                            if gi.is_nan() {
+                                eprintln!("Nan detected with id {:?}, child {}", node.get_id(), i);
+                                panic!()
+                            }
+                        }
+                    }
+                }
 
                 // Update grads
                 grads.iter_mut().zip(temp_grads.into_iter()).for_each(|(g, tg)| {

@@ -20,7 +20,7 @@ impl Computation {
     }
 
     fn shared(value: Arc<Vec<DType>>) -> Self {
-        Computation { value: Data::Shared(value) }
+       Computation { value: Data::Shared(value) }
     }
 
     fn pooled(value: MPVec) -> Self {
@@ -427,6 +427,10 @@ impl Node for Power {
         grad.iter().zip(lx.zip(ly)).for_each(|(gi, (xi, yi))| {
             out.add(*gi * *yi * xi.powf(*yi - 1f32));
         });
+        println!("x: {:?}", x);
+        println!("y: {:?}", y);
+        println!("grad: {:?}", grad);
+        println!("dX: {:?}", child_grads[0]);
         
         // df(x,y)/dy = ln(y) * x ^ y
         let (lx, ly) = Broadcast::from_pair(x, y);
@@ -1145,6 +1149,18 @@ mod tests {
         graph.backward(&ret);
         let x_grad = graph.get_grad(&x);
         assert_eq!(Some(&vec![0f32, 2f32, 4f32]), x_grad);
+    }
+
+    fn euclidean_distance(x: &ANode, y: &ANode) -> ANode {
+        let minus = x - y;
+        println!("{:?}", minus.get_id());
+        let pow = minus.pow(2f32);
+        println!("{:?}", pow.get_id());
+        let sum = pow.sum();
+        println!("{:?}", sum.get_id());
+        let sqrt = sum.pow(0.5);
+        println!("{:?}", sqrt.get_id());
+        sqrt
     }
 
     #[test]

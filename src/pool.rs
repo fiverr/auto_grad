@@ -3,10 +3,12 @@ use lazy_static::lazy_static;
 use std::convert::{AsRef, AsMut};
 use std::collections::HashMap;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool,Ordering};
 use std::ops::{Drop,Deref,DerefMut};
 
 use crate::DType;
 
+static USE_POOL: AtomicBool = AtomicBool::new(true);
 lazy_static! {
     static ref POOL: Mutex<MemoryPool> = {
         let m = MemoryPool::new();
@@ -43,10 +45,18 @@ impl MemoryPool {
     }
 }
 
+pub fn use_shared_pool(use_pool: bool) {
+    USE_POOL.store(use_pool, Ordering::SeqCst);
+}
+
 pub fn allocate_vec(size: usize) -> MPVec {
-    let mut pool = POOL.lock()
-        .expect("Error accessing memory pool!");
-    pool.get(size)
+    if USE_POOL.load(Ordering::Relaxed) {
+        let mut pool = POOL.lock()
+            .expect("Error accessing memory pool!");
+        pool.get(size)
+    } else {
+        MPVec(vec![0.; size])
+    }
 }
 
 pub fn clear_pool() {
@@ -56,9 +66,11 @@ pub fn clear_pool() {
 }
 
 fn return_vec(v: Vec<DType>) {
-    let mut pool = POOL.lock()
-        .expect("Error accessing memory pool!");
-    pool.ret(v);
+    if USE_POOL.load(Ordering::Relaxed) {
+        let mut pool = POOL.lock()
+            .expect("Error accessing memory pool!");
+        pool.ret(v);
+    }
 }
 
 pub struct MPVec(Vec<DType>);
