@@ -427,10 +427,6 @@ impl Node for Power {
         grad.iter().zip(lx.zip(ly)).for_each(|(gi, (xi, yi))| {
             out.add(*gi * *yi * xi.powf(*yi - 1f32));
         });
-        println!("x: {:?}", x);
-        println!("y: {:?}", y);
-        println!("grad: {:?}", grad);
-        println!("dX: {:?}", child_grads[0]);
         
         // df(x,y)/dy = ln(y) * x ^ y
         let (lx, ly) = Broadcast::from_pair(x, y);
@@ -1153,13 +1149,9 @@ mod tests {
 
     fn euclidean_distance(x: &ANode, y: &ANode) -> ANode {
         let minus = x - y;
-        println!("{:?}", minus.get_id());
         let pow = minus.pow(2f32);
-        println!("{:?}", pow.get_id());
         let sum = pow.sum();
-        println!("{:?}", sum.get_id());
         let sqrt = sum.pow(0.5);
-        println!("{:?}", sqrt.get_id());
         sqrt
     }
 
@@ -1243,7 +1235,6 @@ mod tests {
             let y1 = &x - &y;
             let y2 = (&y1).pow(&c);
             let err = (&y2).sum();
-            println!("Error: {}", err.value()[0]);
             graph.zero_grads();
             graph.backward(&err);
             let x_grad = graph.get_grad(&x).unwrap();
@@ -1252,7 +1243,6 @@ mod tests {
             v.iter_mut().zip(x_grad.iter()).for_each(|(vi, gi)| {
                 *vi -= alpha * *gi;
             });
-            println!("X: {:?}", v);
         }
 
         assert!((v[0] - y.value()[0]).abs() < 1e-5);
