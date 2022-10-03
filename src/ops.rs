@@ -735,6 +735,116 @@ impl Node for BulkSum {
 }
 
 
+pub(crate) struct Maximum(NodeIdx, Vec<ANode>, Computation);
+
+impl Maximum {
+    pub(crate) fn new(left: ANode, right:ANode) -> ANode {
+        let idx = NodeIdx::new();
+        let value = Maximum::compute(&left, &right);
+        let node  = Maximum(idx, vec![left, right], Computation::pooled(value));
+        ANode::new(Arc::new(node))
+    }
+
+    fn compute(left: &ANode, right: &ANode) -> MPVec {
+        let (lv, rv) = Broadcast::from_pair(left.value(), right.value());
+        let mut out = allocate_vec(lv.len);
+        out.iter_mut().zip(lv.zip(rv)).for_each(|(oi, (lvi, rvi))| {
+            *oi = lvi.max(*rvi)
+        });
+        out
+    }
+}
+
+impl Node for Maximum {
+    fn get_id(&self) -> NodeIdx { self.0.clone() }
+
+    fn get_children(&self) -> Option<&[ANode]> { 
+        Some(self.1.as_slice())
+    }
+
+    fn is_leaf(&self) -> bool { false }
+
+    fn value(&self) -> &[DType] {
+        &self.2.get()
+    }
+
+    fn requires_grad(&self) -> bool { false }
+
+    fn compute_grad(&self, grad: &[DType], child_grads: &mut [Vec<DType>]) {
+        // f(x,y) = x.max(y)
+        let left = self.1[0].value();
+        let right = self.1[1].value();
+        let (lv, rv) = Broadcast::from_pair(left, right);
+        let (left_grad, right_grad) = child_grads.split_at_mut(1);
+        let mut left_out = Updater::new(&mut left_grad[0], grad.len());
+        let mut right_out = Updater::new(&mut right_grad[0], grad.len());
+        grad.iter().zip(lv.zip(rv)).for_each(|(gi, (xi, yi))| {
+            if xi >= yi {
+                left_out.add(*gi);
+                right_out.add(0f32);
+            } else {
+                right_out.add(*gi);
+                left_out.add(0f32);
+            }
+        });
+    }
+}
+
+pub(crate) struct Minimum(NodeIdx, Vec<ANode>, Computation);
+
+impl Minimum {
+    pub(crate) fn new(left: ANode, right:ANode) -> ANode {
+        let idx = NodeIdx::new();
+        let value = Minimum::compute(&left, &right);
+        let node  = Minimum(idx, vec![left, right], Computation::pooled(value));
+        ANode::new(Arc::new(node))
+    }
+
+    fn compute(left: &ANode, right: &ANode) -> MPVec {
+        let (lv, rv) = Broadcast::from_pair(left.value(), right.value());
+        let mut out = allocate_vec(lv.len);
+        out.iter_mut().zip(lv.zip(rv)).for_each(|(oi, (lvi, rvi))| {
+            *oi = lvi.min(*rvi)
+        });
+        out
+    }
+}
+
+impl Node for Minimum {
+    fn get_id(&self) -> NodeIdx { self.0.clone() }
+
+    fn get_children(&self) -> Option<&[ANode]> { 
+        Some(self.1.as_slice())
+    }
+
+    fn is_leaf(&self) -> bool { false }
+
+    fn value(&self) -> &[DType] {
+        &self.2.get()
+    }
+
+    fn requires_grad(&self) -> bool { false }
+
+    fn compute_grad(&self, grad: &[DType], child_grads: &mut [Vec<DType>]) {
+        // f(x,y) = x.max(y)
+        let left = self.1[0].value();
+        let right = self.1[1].value();
+        let (lv, rv) = Broadcast::from_pair(left, right);
+        let (left_grad, right_grad) = child_grads.split_at_mut(1);
+        let mut left_out = Updater::new(&mut left_grad[0], grad.len());
+        let mut right_out = Updater::new(&mut right_grad[0], grad.len());
+        grad.iter().zip(lv.zip(rv)).for_each(|(gi, (xi, yi))| {
+            if xi >= yi {
+                right_out.add(*gi);
+                left_out.add(0f32);
+            } else {
+                left_out.add(*gi);
+                right_out.add(0f32);
+            }
+        });
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -898,6 +1008,38 @@ mod tests {
 
         let grad = graph.get_grad(&x).unwrap();
         assert_eq!(grad, &[-1., -(-1f32).exp(), -(-2f32).exp()]);
+    }
+
+    #[test]
+    fn test_maximum() {
+        let x = Variable::new(vec![1., 2.]);
+        let y = Variable::new(vec![3., 5.]);
+
+        let out = (&x).pow(4f32).maximum(2f32 * &y);
+
+        let mut graph = Graph::new();
+        graph.backward(&out);
+
+        let x_grad = graph.get_grad(&x).unwrap();
+        let y_grad = graph.get_grad(&y).unwrap();
+        assert_eq!(x_grad, &[0f32, 32f32]);
+        assert_eq!(y_grad, &[2f32, 0f32]);
+    }
+
+    #[test]
+    fn test_minimum() {
+        let x = Variable::new(vec![1., 2.]);
+        let y = Variable::new(vec![3., 5.]);
+
+        let out = (&x).pow(4f32).minimum(2f32 * &y);
+
+        let mut graph = Graph::new();
+        graph.backward(&out);
+
+        let x_grad = graph.get_grad(&x).unwrap();
+        let y_grad = graph.get_grad(&y).unwrap();
+        assert_eq!(x_grad, &[4f32, 0f32]);
+        assert_eq!(y_grad, &[0f32, 2f32]);
     }
 
     #[test]

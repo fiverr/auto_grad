@@ -96,10 +96,6 @@ impl FromConstant for Vec<f32> {
     }
 }
 
-pub trait Pow<Rhs=Self> {
-    type Output;
-    fn pow(self, rhs: Rhs) -> Self::Output;
-}
 
 impl Deref for ANode {
     type Target = Arc<dyn Node>;
@@ -280,6 +276,11 @@ impl Neg for &ANode {
     }
 }
 
+pub trait Pow<Rhs=Self> {
+    type Output;
+    fn pow(self, rhs: Rhs) -> Self::Output;
+}
+
 impl Pow for ANode {
     type Output = ANode;
     fn pow(self, rhs: ANode) -> Self::Output {
@@ -321,4 +322,36 @@ impl BulkOps for Vec<&ANode> {
         BulkSum::new(self.into_iter().cloned())
     }
 }
+
+pub trait MaximumOps<Rhs=Self> {
+    type Output;
+    fn maximum(self, rhs: Rhs) -> Self::Output;
+
+}
+
+impl MaximumOps for ANode {
+    type Output = ANode;
+    fn maximum(self, rhs: ANode) -> Self::Output {
+        Maximum::new(self, rhs)
+    }
+}
+
+convert_binops!    { impl MaximumOps, maximum for ANode, ANode }
+forward_ref_binop! { impl MaximumOps, maximum for ANode, ANode }
+
+pub trait MinimumOps<Rhs=Self> {
+    type Output;
+    fn minimum(self, rhs: Rhs) -> Self::Output;
+
+}
+
+impl MinimumOps for ANode {
+    type Output = ANode;
+    fn minimum(self, rhs: ANode) -> Self::Output {
+        Minimum::new(self, rhs)
+    }
+}
+
+convert_binops!    { impl MinimumOps, minimum for ANode, ANode }
+forward_ref_binop! { impl MinimumOps, minimum for ANode, ANode }
 
