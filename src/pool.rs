@@ -1,6 +1,7 @@
 use lazy_static::lazy_static;
 
 use std::convert::{AsRef, AsMut};
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool,Ordering};
@@ -10,9 +11,9 @@ use crate::DType;
 
 static USE_POOL: AtomicBool = AtomicBool::new(true);
 thread_local! {
-    static POOL: Mutex<MemoryPool> = {
+    static POOL: RefCell<MemoryPool> = {
         let m = MemoryPool::new();
-        Mutex::new(m)
+        RefCell::new(m)
     };
 }
 
@@ -56,8 +57,7 @@ fn should_use_pool() -> bool {
 pub fn allocate_vec(size: usize) -> MPVec {
     if should_use_pool() {
         POOL.with(|p| {
-            let mut pool = p.lock()
-                .expect("Error accessing memory pool!");
+            let mut pool = p.borrow_mut();
             pool.get(size)
         })
     } else {
@@ -67,8 +67,7 @@ pub fn allocate_vec(size: usize) -> MPVec {
 
 pub fn clear_pool() {
     POOL.with(|p| {
-        let mut pool = p.lock()
-            .expect("Error accessing memory pool!");
+        let mut pool = p.borrow_mut();
         pool.clear();
     });
 }
@@ -76,8 +75,7 @@ pub fn clear_pool() {
 fn return_vec(v: Vec<DType>) {
     if should_use_pool() {
         POOL.with(|p| {
-            let mut pool = p.lock()
-                .expect("Error accessing memory pool!");
+            let mut pool = p.borrow_mut();
             pool.ret(v);
         });
     }
