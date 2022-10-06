@@ -1,8 +1,9 @@
-use std::collections::HashMap;
+use hashbrown::HashMap;
 use std::sync::Arc;
 
 use crate::{DType,ANode,NodeIdx,Node};
 use crate::vecops::iadd;
+use crate::pool::allocate_vec;
 
 #[derive(Debug)]
 pub struct Graph {
