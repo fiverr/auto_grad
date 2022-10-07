@@ -12,7 +12,7 @@ pub use ops::{Variable,Constant};
 pub use pool::{clear_pool, use_shared_pool};
 
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::rc::Rc;
 use std::ops::{Add,Sub,Mul,Div,Deref,Neg};
 
 use crate::ops::*;
@@ -47,10 +47,10 @@ pub trait Node {
 }
 
 #[derive(Clone)]
-pub struct ANode(Arc<dyn Node>);
+pub struct ANode(Rc<dyn Node>);
 
 impl ANode {
-    fn new(n: Arc<dyn Node>) -> Self {
+    fn new(n: Rc<dyn Node>) -> Self {
         ANode(n)
     }
 
@@ -98,7 +98,7 @@ impl FromConstant for Vec<f32> {
 
 
 impl Deref for ANode {
-    type Target = Arc<dyn Node>;
+    type Target = Rc<dyn Node>;
 
     fn deref(&self) -> &Self::Target {
         &self.0

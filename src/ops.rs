@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::rc::Rc;
 
 use crate::*;
 use crate::vecops::{add, iadd, sub, isub, mul, imul, div};
@@ -6,7 +6,7 @@ use crate::pool::{MPVec,allocate_vec};
 
 enum Data {
     Owned(Vec<DType>),
-    Shared(Arc<Vec<DType>>),
+    Shared(Rc<Vec<DType>>),
     Pooled(MPVec)
 }
 
@@ -19,7 +19,7 @@ impl Computation {
         Computation { value: Data::Owned(value) }
     }
 
-    fn shared(value: Arc<Vec<DType>>) -> Self {
+    fn shared(value: Rc<Vec<DType>>) -> Self {
        Computation { value: Data::Shared(value) }
     }
 
@@ -41,16 +41,16 @@ pub struct Variable(NodeIdx, Computation);
 impl Variable {
     pub fn new(value: Vec<DType>) -> ANode {
         let v = Variable(NodeIdx::new(), Computation::new(value));
-        ANode::new(Arc::new(v))
+        ANode::new(Rc::new(v))
     }
 
     pub fn scalar(value: DType) -> ANode {
         Variable::new(vec![value])
     }
     
-    pub fn shared(value: Arc<Vec<DType>>) -> ANode {
+    pub fn shared(value: Rc<Vec<DType>>) -> ANode {
         let v = Variable(NodeIdx::new(), Computation::shared(value));
-        ANode::new(Arc::new(v))
+        ANode::new(Rc::new(v))
     }
 
 }
@@ -78,14 +78,14 @@ pub struct Constant(NodeIdx, Computation);
 impl Constant {
     pub fn new(value: Vec<DType>) -> ANode {
         let c = Constant(NodeIdx::new(), Computation::new(value));
-        ANode::new(Arc::new(c))
+        ANode::new(Rc::new(c))
     }
 
     pub fn scalar(value: DType) -> ANode {
         let mut v = allocate_vec(1);
         v.as_mut()[0] = value;
         let c = Constant(NodeIdx::new(), Computation::pooled(v));
-        ANode::new(Arc::new(c))
+        ANode::new(Rc::new(c))
     }
 
 }
@@ -182,7 +182,7 @@ impl AddN {
         let idx = NodeIdx::new();
         let value = AddN::compute(&left, &right);
         let node = AddN(idx, vec![left, right], Computation::pooled(value));
-        ANode::new(Arc::new(node))
+        ANode::new(Rc::new(node))
     }
 
     fn compute(left: &ANode, right: &ANode) -> MPVec {
@@ -230,7 +230,7 @@ impl Subtract {
         let idx = NodeIdx::new();
         let value = Subtract::compute(&left, &right);
         let node = Subtract(idx, vec![left, right], Computation::pooled(value));
-        ANode::new(Arc::new(node))
+        ANode::new(Rc::new(node))
     }
 
     fn compute(left: &ANode, right: &ANode) -> MPVec {
@@ -278,7 +278,7 @@ impl Multiply {
         let idx = NodeIdx::new();
         let value = Multiply::compute(&left, &right);
         let node = Multiply(idx, vec![left, right], Computation::pooled(value));
-        ANode::new(Arc::new(node))
+        ANode::new(Rc::new(node))
     }
 
     fn compute(left: &ANode, right: &ANode) -> MPVec {
@@ -333,7 +333,7 @@ impl Divide {
         let idx = NodeIdx::new();
         let value = Divide::compute(&left, &right);
         let node = Divide(idx, vec![left, right], Computation::pooled(value));
-        ANode::new(Arc::new(node))
+        ANode::new(Rc::new(node))
     }
 
     fn compute(left: &ANode, right: &ANode) -> MPVec {
@@ -386,7 +386,7 @@ impl Power {
         let idx = NodeIdx::new();
         let value = Power::compute(&base, &exp);
         let node = Power(idx, vec![base, exp], Computation::pooled(value));
-        ANode::new(Arc::new(node))
+        ANode::new(Rc::new(node))
     }
 
     fn compute(left: &ANode, right: &ANode) -> MPVec {
@@ -445,7 +445,7 @@ impl SumVec {
         let idx = NodeIdx::new();
         let value = SumVec::compute(&vec);
         let node = SumVec(idx, vec![vec], Computation::pooled(value));
-        ANode::new(Arc::new(node))
+        ANode::new(Rc::new(node))
     }
 
     fn compute(left: &ANode) -> MPVec {
@@ -487,7 +487,7 @@ impl Cos {
         let idx = NodeIdx::new();
         let value = Cos::compute(&vec);
         let node = Cos(idx, vec![vec], Computation::pooled(value));
-        ANode::new(Arc::new(node))
+        ANode::new(Rc::new(node))
     }
 
     fn compute(left: &ANode) -> MPVec {
@@ -529,7 +529,7 @@ impl Sin {
         let idx = NodeIdx::new();
         let value = Sin::compute(&vec);
         let node = Sin(idx, vec![vec], Computation::pooled(value));
-        ANode::new(Arc::new(node))
+        ANode::new(Rc::new(node))
     }
 
     fn compute(left: &ANode) -> MPVec {
@@ -572,7 +572,7 @@ impl Ln {
         let idx = NodeIdx::new();
         let value = Ln::compute(&vec);
         let node = Ln(idx, vec![vec], Computation::pooled(value));
-        ANode::new(Arc::new(node))
+        ANode::new(Rc::new(node))
     }
 
     fn compute(left: &ANode) -> MPVec {
@@ -614,7 +614,7 @@ impl Exp {
         let idx = NodeIdx::new();
         let value = Exp::compute(&vec);
         let node = Exp(idx, vec![vec], Computation::pooled(value));
-        ANode::new(Arc::new(node))
+        ANode::new(Rc::new(node))
     }
 
     fn compute(left: &ANode) -> MPVec {
@@ -656,7 +656,7 @@ impl Negate {
         let idx = NodeIdx::new();
         let value = Negate::compute(&vec);
         let node = Negate(idx, vec![vec], Computation::pooled(value));
-        ANode::new(Arc::new(node))
+        ANode::new(Rc::new(node))
     }
 
     fn compute(left: &ANode) -> MPVec {
@@ -698,7 +698,7 @@ impl BulkSum {
         let children: Vec<_> = vecs.collect();
         let value = BulkSum::compute(&children);
         let node  = BulkSum(idx, children, Computation::pooled(value));
-        ANode::new(Arc::new(node))
+        ANode::new(Rc::new(node))
     }
 
     fn compute(xs: &[ANode]) -> MPVec {
@@ -742,7 +742,7 @@ impl Maximum {
         let idx = NodeIdx::new();
         let value = Maximum::compute(&left, &right);
         let node  = Maximum(idx, vec![left, right], Computation::pooled(value));
-        ANode::new(Arc::new(node))
+        ANode::new(Rc::new(node))
     }
 
     fn compute(left: &ANode, right: &ANode) -> MPVec {
@@ -797,7 +797,7 @@ impl Minimum {
         let idx = NodeIdx::new();
         let value = Minimum::compute(&left, &right);
         let node  = Minimum(idx, vec![left, right], Computation::pooled(value));
-        ANode::new(Arc::new(node))
+        ANode::new(Rc::new(node))
     }
 
     fn compute(left: &ANode, right: &ANode) -> MPVec {
@@ -1251,7 +1251,7 @@ mod tests {
 
     #[test]
     fn test_updateable() {
-        let mut v = Arc::new(vec![0f32, 0f32]);
+        let mut v = Rc::new(vec![0f32, 0f32]);
         let mut graph = Graph::new();
         let grad = {
             let x = Variable::shared(v.clone());
@@ -1259,7 +1259,7 @@ mod tests {
             graph.backward(&res);
             graph.get_grad(&x)
         };
-        let v = Arc::get_mut(&mut v).unwrap();
+        let v = Rc::get_mut(&mut v).unwrap();
         assert_eq!(v, &mut [0f32, 0f32]);
     }
 

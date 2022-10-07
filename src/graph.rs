@@ -1,6 +1,6 @@
-use hashbrown::HashMap;
-use std::sync::Arc;
+use std::rc::Rc;
 
+use hashbrown::HashMap;
 use crate::{DType,ANode,NodeIdx,Node};
 use crate::vecops::iadd;
 use crate::pool::allocate_vec;
@@ -140,7 +140,7 @@ pub(crate) struct Run(NodeIdx, Vec<ANode>);
 impl Run {
     pub(crate) fn new(x: &ANode) -> ANode {
         let idx = NodeIdx::new();
-        ANode::new(Arc::new(Run(idx, vec![x.clone()])))
+        ANode::new(Rc::new(Run(idx, vec![x.clone()])))
     }
 }
 
