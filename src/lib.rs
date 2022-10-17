@@ -9,7 +9,7 @@ mod pool;
 
 pub use graph::Graph;
 pub use ops::{Variable,Constant};
-pub use pool::{clear_pool, use_shared_pool};
+pub use pool::{clear_pool, use_shared_pool, MPVec};
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::rc::Rc;
@@ -42,7 +42,7 @@ pub trait Node {
 
     fn requires_grad(&self) -> bool;
 
-    fn compute_grad(&self, _grad: &[DType], _results: &mut [Vec<DType>]) { }
+    fn compute_grad(&self, _grad: &[DType], _results: &mut [MPVec]) { }
 
 }
 

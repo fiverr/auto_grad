@@ -1,8 +1,8 @@
 use lazy_static::lazy_static;
 
+use hashbrown::HashMap;
 use std::convert::{AsRef, AsMut};
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool,Ordering};
 use std::ops::{Drop,Deref,DerefMut};
@@ -51,7 +51,7 @@ pub fn use_shared_pool(use_pool: bool) {
 }
 
 fn should_use_pool() -> bool {
-    USE_POOL.load(Ordering::SeqCst)
+    USE_POOL.load(Ordering::Relaxed)
 }
 
 pub fn allocate_vec(size: usize) -> MPVec {
@@ -81,6 +81,7 @@ fn return_vec(v: Vec<DType>) {
     }
 }
 
+#[derive(Debug,Clone)]
 pub struct MPVec(Vec<DType>);
 
 impl Drop for MPVec {

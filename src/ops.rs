@@ -56,19 +56,25 @@ impl Variable {
 }
 
 impl Node for Variable {
-    fn get_id(&self) -> NodeIdx { self.0.clone() }
+    #[inline]
+    fn get_id(&self) -> NodeIdx { self.0 }
 
+    #[inline]
     fn is_leaf(&self) -> bool { true }
 
+    #[inline]
     fn value(&self) -> &[DType] {
         &self.1.get()
     }
 
+    #[inline]
     fn get_children(&self) -> Option<&[ANode]> { None }
 
+    #[inline]
     fn requires_grad(&self) -> bool { true }
 
-    fn compute_grad(&self, _grad: &[DType], _child_grads: &mut [Vec<DType>]) {
+    #[inline]
+    fn compute_grad(&self, _grad: &[DType], _child_grads: &mut [MPVec]) {
         // Pass
     }
 }
@@ -91,16 +97,22 @@ impl Constant {
 }
 
 impl Node for Constant {
-    fn get_id(&self) -> NodeIdx { self.0.clone() }
 
+    #[inline]
+    fn get_id(&self) -> NodeIdx { self.0 }
+
+    #[inline]
     fn get_children(&self) -> Option<&[ANode]> { None }
 
+    #[inline]
     fn is_leaf(&self) -> bool { true }
 
+    #[inline]
     fn value(&self) -> &[DType] {
         &self.1.get()
     }
 
+    #[inline]
     fn requires_grad(&self) -> bool { false }
 }
 
@@ -165,11 +177,17 @@ impl <'a> Updater<'a> {
         }
     }
 
+    #[inline]
     fn add(&mut self, v: DType) {
         if self.data.len() == 1 {
-            self.data[0] += v;
+            unsafe {
+                *self.data.get_unchecked_mut(0) += v;
+            }
         } else {
-            self.data[self.cur_idx] += v;
+
+            unsafe {
+                *self.data.get_unchecked_mut(self.cur_idx) += v;
+            }
             self.cur_idx += 1;
         }
     }
@@ -196,7 +214,8 @@ impl AddN {
 }
 
 impl Node for AddN {
-    fn get_id(&self) -> NodeIdx { self.0.clone() }
+    #[inline]
+    fn get_id(&self) -> NodeIdx { self.0 }
 
     fn get_children(&self) -> Option<&[ANode]> { 
         Some(self.1.as_slice())
@@ -210,7 +229,7 @@ impl Node for AddN {
 
     fn requires_grad(&self) -> bool { false }
 
-    fn compute_grad(&self, grad: &[DType], child_grads: &mut [Vec<DType>]) {
+    fn compute_grad(&self, grad: &[DType], child_grads: &mut [MPVec]) {
         // f(x,y) = x - y
         // df(x,y)/dx = 1
         // df(x,y)/dy = 1
@@ -244,7 +263,8 @@ impl Subtract {
 }
 
 impl Node for Subtract {
-    fn get_id(&self) -> NodeIdx { self.0.clone() }
+    #[inline]
+    fn get_id(&self) -> NodeIdx { self.0 }
 
     fn get_children(&self) -> Option<&[ANode]> { 
         Some(self.1.as_slice())
@@ -258,7 +278,7 @@ impl Node for Subtract {
 
     fn requires_grad(&self) -> bool { false }
 
-    fn compute_grad(&self, grad: &[DType], child_grads: &mut [Vec<DType>]) {
+    fn compute_grad(&self, grad: &[DType], child_grads: &mut [MPVec]) {
         // f(x,y) = x - y
         // df(x,y)/dx = 1
         // df(x,y)/dy = -1
@@ -292,7 +312,8 @@ impl Multiply {
 }
 
 impl Node for Multiply {
-    fn get_id(&self) -> NodeIdx { self.0.clone() }
+    #[inline]
+    fn get_id(&self) -> NodeIdx { self.0 }
 
     fn get_children(&self) -> Option<&[ANode]> { 
         Some(self.1.as_slice())
@@ -306,7 +327,7 @@ impl Node for Multiply {
 
     fn requires_grad(&self) -> bool { false }
 
-    fn compute_grad(&self, grad: &[DType], child_grads: &mut [Vec<DType>]) {
+    fn compute_grad(&self, grad: &[DType], child_grads: &mut [MPVec]) {
         // f(x,y) = x * y
         // df(x,y)/dx = y
         // df(x,y)/dy = x
@@ -347,7 +368,8 @@ impl Divide {
 }
 
 impl Node for Divide {
-    fn get_id(&self) -> NodeIdx { self.0.clone() }
+    #[inline]
+    fn get_id(&self) -> NodeIdx { self.0 }
 
     fn get_children(&self) -> Option<&[ANode]> { 
         Some(self.1.as_slice())
@@ -361,7 +383,7 @@ impl Node for Divide {
 
     fn requires_grad(&self) -> bool { false }
 
-    fn compute_grad(&self, grad: &[DType], child_grads: &mut [Vec<DType>]) {
+    fn compute_grad(&self, grad: &[DType], child_grads: &mut [MPVec]) {
         // f(x,y) = x / y
         let x = self.1[0].value();
         let y = self.1[1].value();
@@ -400,7 +422,8 @@ impl Power {
 }
 
 impl Node for Power {
-    fn get_id(&self) -> NodeIdx { self.0.clone() }
+    #[inline]
+    fn get_id(&self) -> NodeIdx { self.0 }
 
     fn get_children(&self) -> Option<&[ANode]> { 
         Some(self.1.as_slice())
@@ -414,7 +437,7 @@ impl Node for Power {
 
     fn requires_grad(&self) -> bool { false }
 
-    fn compute_grad(&self, grad: &[DType], child_grads: &mut [Vec<DType>]) {
+    fn compute_grad(&self, grad: &[DType], child_grads: &mut [MPVec]) {
         // f(x,y) = x ^ y
         // df(x,y)/dx = y * x ^ (y - 1)
         // df(x,y)/dy = ln(y) * x ^ y
@@ -457,7 +480,8 @@ impl SumVec {
 }
 
 impl Node for SumVec {
-    fn get_id(&self) -> NodeIdx { self.0.clone() }
+    #[inline]
+    fn get_id(&self) -> NodeIdx { self.0 }
 
     fn get_children(&self) -> Option<&[ANode]> { 
         Some(self.1.as_slice())
@@ -471,7 +495,7 @@ impl Node for SumVec {
 
     fn requires_grad(&self) -> bool { false }
 
-    fn compute_grad(&self, grad: &[DType], child_grads: &mut [Vec<DType>]) {
+    fn compute_grad(&self, grad: &[DType], child_grads: &mut [MPVec]) {
         // f(x) = x.sum()
         // df(x)/dx_1 = 1;
         for out in child_grads.iter_mut() {
@@ -499,7 +523,8 @@ impl Cos {
 }
 
 impl Node for Cos {
-    fn get_id(&self) -> NodeIdx { self.0.clone() }
+    #[inline]
+    fn get_id(&self) -> NodeIdx { self.0 }
 
     fn get_children(&self) -> Option<&[ANode]> { 
         Some(self.1.as_slice())
@@ -513,7 +538,7 @@ impl Node for Cos {
 
     fn requires_grad(&self) -> bool { false }
 
-    fn compute_grad(&self, grad: &[DType], child_grads: &mut [Vec<DType>]) {
+    fn compute_grad(&self, grad: &[DType], child_grads: &mut [MPVec]) {
         let x = self.1[0].value();
         let out = &mut child_grads[0];
         out.iter_mut().zip(grad.iter().zip(x.iter())).for_each(|(oi, (gi, xi))| {
@@ -542,7 +567,8 @@ impl Sin {
 }
 
 impl Node for Sin {
-    fn get_id(&self) -> NodeIdx { self.0.clone() }
+    #[inline]
+    fn get_id(&self) -> NodeIdx { self.0 }
 
     fn get_children(&self) -> Option<&[ANode]> { 
         Some(self.1.as_slice())
@@ -556,7 +582,7 @@ impl Node for Sin {
 
     fn requires_grad(&self) -> bool { false }
 
-    fn compute_grad(&self, grad: &[DType], child_grads: &mut [Vec<DType>]) {
+    fn compute_grad(&self, grad: &[DType], child_grads: &mut [MPVec]) {
         let x = self.1[0].value();
         let out = &mut child_grads[0];
         out.iter_mut().zip(grad.iter().zip(x.iter())).for_each(|(oi, (gi, xi))| {
@@ -584,7 +610,8 @@ impl Ln {
 }
 
 impl Node for Ln {
-    fn get_id(&self) -> NodeIdx { self.0.clone() }
+    #[inline]
+    fn get_id(&self) -> NodeIdx { self.0 }
 
     fn get_children(&self) -> Option<&[ANode]> { 
         Some(self.1.as_slice())
@@ -598,7 +625,7 @@ impl Node for Ln {
 
     fn requires_grad(&self) -> bool { false }
 
-    fn compute_grad(&self, grad: &[DType], child_grads: &mut [Vec<DType>]) {
+    fn compute_grad(&self, grad: &[DType], child_grads: &mut [MPVec]) {
         let x = self.1[0].value();
         let out = &mut child_grads[0];
         out.iter_mut().zip(grad.iter().zip(x.iter())).for_each(|(oi, (gi, xi))| {
@@ -627,7 +654,8 @@ impl Exp {
 }
 
 impl Node for Exp {
-    fn get_id(&self) -> NodeIdx { self.0.clone() }
+    #[inline]
+    fn get_id(&self) -> NodeIdx { self.0 }
 
     fn get_children(&self) -> Option<&[ANode]> { 
         Some(self.1.as_slice())
@@ -641,7 +669,7 @@ impl Node for Exp {
 
     fn requires_grad(&self) -> bool { false }
 
-    fn compute_grad(&self, grad: &[DType], child_grads: &mut [Vec<DType>]) {
+    fn compute_grad(&self, grad: &[DType], child_grads: &mut [MPVec]) {
         let x = self.value();
         let mut out = &mut child_grads[0];
         out.clone_from_slice(x);
@@ -669,7 +697,8 @@ impl Negate {
 }
 
 impl Node for Negate {
-    fn get_id(&self) -> NodeIdx { self.0.clone() }
+    #[inline]
+    fn get_id(&self) -> NodeIdx { self.0 }
 
     fn get_children(&self) -> Option<&[ANode]> { 
         Some(self.1.as_slice())
@@ -683,7 +712,7 @@ impl Node for Negate {
 
     fn requires_grad(&self) -> bool { false }
 
-    fn compute_grad(&self, grad: &[DType], child_grads: &mut [Vec<DType>]) {
+    fn compute_grad(&self, grad: &[DType], child_grads: &mut [MPVec]) {
         child_grads[0].iter_mut().zip(grad.iter()).for_each(|(oi, gi)| {
             *oi = -*gi;
         });
@@ -711,7 +740,8 @@ impl BulkSum {
 }
 
 impl Node for BulkSum {
-    fn get_id(&self) -> NodeIdx { self.0.clone() }
+    #[inline]
+    fn get_id(&self) -> NodeIdx { self.0 }
 
     fn get_children(&self) -> Option<&[ANode]> { 
         Some(self.1.as_slice())
@@ -725,7 +755,7 @@ impl Node for BulkSum {
 
     fn requires_grad(&self) -> bool { false }
 
-    fn compute_grad(&self, grad: &[DType], child_grads: &mut [Vec<DType>]) {
+    fn compute_grad(&self, grad: &[DType], child_grads: &mut [MPVec]) {
         // Just the gradient for each, easy peasy
         let x = self.value();
         for out in child_grads.iter_mut() {
@@ -756,7 +786,8 @@ impl Maximum {
 }
 
 impl Node for Maximum {
-    fn get_id(&self) -> NodeIdx { self.0.clone() }
+    #[inline]
+    fn get_id(&self) -> NodeIdx { self.0 }
 
     fn get_children(&self) -> Option<&[ANode]> { 
         Some(self.1.as_slice())
@@ -770,7 +801,7 @@ impl Node for Maximum {
 
     fn requires_grad(&self) -> bool { false }
 
-    fn compute_grad(&self, grad: &[DType], child_grads: &mut [Vec<DType>]) {
+    fn compute_grad(&self, grad: &[DType], child_grads: &mut [MPVec]) {
         // f(x,y) = x.max(y)
         let left = self.1[0].value();
         let right = self.1[1].value();
@@ -811,7 +842,8 @@ impl Minimum {
 }
 
 impl Node for Minimum {
-    fn get_id(&self) -> NodeIdx { self.0.clone() }
+    #[inline]
+    fn get_id(&self) -> NodeIdx { self.0 }
 
     fn get_children(&self) -> Option<&[ANode]> { 
         Some(self.1.as_slice())
@@ -825,7 +857,7 @@ impl Node for Minimum {
 
     fn requires_grad(&self) -> bool { false }
 
-    fn compute_grad(&self, grad: &[DType], child_grads: &mut [Vec<DType>]) {
+    fn compute_grad(&self, grad: &[DType], child_grads: &mut [MPVec]) {
         // f(x,y) = x.max(y)
         let left = self.1[0].value();
         let right = self.1[1].value();
