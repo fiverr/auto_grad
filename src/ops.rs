@@ -53,6 +53,13 @@ impl Variable {
         ANode::new(Rc::new(v))
     }
 
+    pub fn pooled(value: &[DType]) -> ANode {
+        let mut mpv = allocate_vec(value.len());
+        mpv.clone_from_slice(value);
+        let v = Variable(NodeIdx::new(), Computation::pooled(mpv));
+        ANode::new(Rc::new(v))
+    }
+
 }
 
 impl Node for Variable {
@@ -230,11 +237,11 @@ impl Node for AddN {
     fn requires_grad(&self) -> bool { false }
 
     fn compute_grad(&self, grad: &[DType], child_grads: &mut [MPVec]) {
-        // f(x,y) = x - y
+        // f(x,y) = x + y
         // df(x,y)/dx = 1
         // df(x,y)/dy = 1
         for out in child_grads.iter_mut() {
-            let it  = Broadcast::sized(grad, out.len());
+            let it = Broadcast::sized(grad, out.len());
             let mut agg = Updater::new(out, grad.len());
             it.for_each(|gi| agg.add(*gi));
         }
@@ -749,6 +756,7 @@ impl Node for BulkSum {
 
     fn is_leaf(&self) -> bool { false }
 
+    #[inline]
     fn value(&self) -> &[DType] {
         &self.2.get()
     }
@@ -888,6 +896,20 @@ mod tests {
         let y = Variable::new(vec![2., 3.]);
         let res = AddN::new(x, y);
         assert_eq!(res.value(), &[2., 4.]);
+    }
+
+    #[test]
+    fn test_add_simple() {
+        let x = Variable::new(vec![0., 1.]);
+        let res = AddN::new(x.clone(), x.clone()).sum();
+        assert_eq!(res.value(), &[2.]);
+
+
+        let mut graph = Graph::new();
+        graph.backward(&res);
+
+        let res = graph.get_grad(&x).unwrap();
+        assert_eq!(res, &[2., 2.]);
     }
 
     #[test]

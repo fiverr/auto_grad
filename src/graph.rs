@@ -1,6 +1,7 @@
 use std::rc::Rc;
 
 use hashbrown::HashMap;
+use hashbrown::hash_map::Entry;
 use crate::{DType,ANode,NodeIdx,Node};
 use crate::vecops::iadd;
 use crate::pool::{allocate_vec,MPVec};
@@ -19,19 +20,22 @@ impl Graph {
         }
     }
 
+    #[inline]
     pub fn debug_nan(&mut self, check: bool)  {
         self.nan_check = check;
     }
-
     
+    #[inline]
     pub fn get_grad(&self, node: &ANode) -> Option<&Vec<DType>> {
         self.gradients.get(&node.get_id()).map(|v| v.as_ref())
     }
 
+    #[inline]
     pub fn zero_grads(&mut self) {
         self.gradients.clear();
     }
 
+    #[inline]
     pub fn clear_memory(&mut self) {
         self.gradients.clear();
     }
@@ -45,39 +49,50 @@ impl Graph {
         }
     }
 
+    #[inline]
     fn get_temp_space(&mut self, size: usize) -> MPVec {
         allocate_vec(size)
     }
 
+    #[inline]
     fn add_grad(&mut self, node: &ANode, grad: MPVec) {
         self.gradients.insert(node.get_id(), grad);
     }
+
+    #[inline]
+    fn add_or_update_grad(&mut self, node: &ANode, grad: MPVec) {
+        match self.gradients.entry(node.get_id()) {
+            Entry::Occupied(mut entry) => {
+                iadd(entry.get_mut(), grad.as_slice());
+            },
+            Entry::Vacant(mut entry) => {
+                entry.insert(grad);
+            }
+        }
+    }
+
     
-   pub fn backward(&mut self, end_node: &ANode) {
+    pub fn backward(&mut self, end_node: &ANode) {
         let out = Run::new(end_node);
         // dz/dz of course is 1
         let mut z_grad = self.get_or_create_grad(&out);
         z_grad.fill(1f32);
         
         // Allocate once
-        let mut grads = Vec::new();
         let mut temp_grads = Vec::new();
         self.add_grad(&out, z_grad);
-        self.recurse(&out, &mut grads, &mut temp_grads);
+        self.recurse(&out, &mut temp_grads);
     }
 
-     fn recurse(&mut self, node: &ANode, grads: &mut Vec<MPVec>, temp_grads: &mut Vec<MPVec>) {
+     fn recurse(&mut self, node: &ANode, temp_grads: &mut Vec<MPVec>) {
         if !node.is_leaf() {
             let node_grad = self.get_or_create_grad(node);
             if let Some(children) = node.get_children() {
-                grads.clear();
                 temp_grads.clear();
                 // Grab gradients
-                grads.extend(children.iter()
-                    .map(|c| self.get_or_create_grad(c)));
 
-                temp_grads.extend(grads.iter()
-                    .map(|g| self.get_temp_space(g.len())));
+                temp_grads.extend(children.iter()
+                    .map(|c| self.get_temp_space(c.value().len())));
 
                 node.compute_grad(&node_grad, temp_grads);
 
@@ -93,13 +108,10 @@ impl Graph {
                 }
 
                 // Update grads
-                grads.iter_mut().zip(temp_grads.into_iter()).for_each(|(g, tg)| {
-                    iadd(g, &tg);
-                });
 
                 // Re-add gradients
-                children.iter().zip(grads.drain(..)).for_each(|(c, g)| {
-                    self.add_grad(c, g);
+                children.iter().zip(temp_grads.drain(..)).for_each(|(c, g)| {
+                    self.add_or_update_grad(c, g);
                 });
 
                 if node.requires_grad() {
@@ -108,7 +120,7 @@ impl Graph {
 
                 // Run children
                 for child in children.iter() {
-                    self.recurse(child, grads, temp_grads);
+                    self.recurse(child, temp_grads);
                 }
 
             } else {

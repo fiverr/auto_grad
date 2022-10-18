@@ -8,3 +8,16 @@ edition = "2021"
 [dependencies]
 lazy_static = "1.4.0"
 hashbrown = "0.12"
+
+[[bench]]
+name = "bench_algos"
+harness = false
+
+[profile.bench]
+debug = true
+
+[profile.release]
+debug = true
+
+[dev-dependencies]
+criterion = "0.3"
