@@ -38,6 +38,7 @@ pub trait Node {
 
     fn get_children(&self) -> Option<&[ANode]>;
 
+    #[inline]
     fn value(&self) -> &[DType];
 
     fn requires_grad(&self) -> bool;
@@ -78,6 +79,9 @@ impl ANode {
         SumVec::new(self.clone())
     }
 
+    pub fn slice(&self, start: usize, len: usize) -> ANode {
+        Slice::new(self.clone(), start, len)
+    }
 }
 
 trait FromConstant {
@@ -309,18 +313,30 @@ forward_ref_binop! { impl Pow, pow for Vec<f32>, ANode }
 
 pub trait BulkOps {
     fn sum_all(self) -> ANode;
+    fn concat(self) -> ANode;
 }
 
 impl BulkOps for Vec<ANode> {
     fn sum_all(self) -> ANode {
         BulkSum::new(self.into_iter())
     }
+
+    fn concat(self) -> ANode {
+        Concat::new(self)
+    }
+
 }
 
 impl BulkOps for Vec<&ANode> {
     fn sum_all(self) -> ANode {
         BulkSum::new(self.into_iter().cloned())
     }
+
+    fn concat(self) -> ANode {
+        let n = self.into_iter().map(|n| n.clone()).collect();
+        Concat::new(n)
+    }
+
 }
 
 pub trait MaximumOps<Rhs=Self> {

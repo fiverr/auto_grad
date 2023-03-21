@@ -27,6 +27,7 @@ impl Computation {
         Computation { value: Data::Pooled(value) }
     }
 
+    #[inline]
     fn get(&self) -> &[DType] {
         match &self.value {
             Data::Owned(v) => &v,
@@ -885,6 +886,102 @@ impl Node for Minimum {
     }
 }
 
+pub(crate) struct Concat(NodeIdx, Vec<ANode>, Computation);
+
+impl Concat {
+    pub(crate) fn new(nodes: Vec<ANode>) -> ANode {
+        let idx = NodeIdx::new();
+        let value = Concat::compute(&nodes);
+        let node  = Concat(idx, nodes, Computation::pooled(value));
+        ANode::new(Rc::new(node))
+    }
+
+    fn compute(nodes: &[ANode]) -> MPVec {
+        let size = nodes.iter().map(|n| n.value().len()).sum::<usize>();
+        let mut out = allocate_vec(size);
+        let mut i = 0;
+        for node in nodes {
+            for vi in node.value() {
+                out[i] = *vi;
+                i += 1;
+            }
+        }
+        out
+    }
+}
+
+impl Node for Concat {
+    #[inline]
+    fn get_id(&self) -> NodeIdx { self.0 }
+
+    fn get_children(&self) -> Option<&[ANode]> { 
+        Some(self.1.as_slice())
+    }
+
+    fn is_leaf(&self) -> bool { false }
+
+    fn value(&self) -> &[DType] {
+        &self.2.get()
+    }
+
+    fn requires_grad(&self) -> bool { false }
+
+    fn compute_grad(&self, grad: &[DType], child_grads: &mut [MPVec]) {
+        let mut i = 0;
+        for cg in child_grads.iter_mut() {
+            cg.iter_mut().for_each(|cgi| {
+                *cgi += grad[i];
+                i += 1;
+            });
+        }
+    }
+}
+
+pub(crate) struct Slice(NodeIdx, Vec<ANode>, (usize, usize), Computation);
+
+impl Slice {
+    pub(crate) fn new(node: ANode, start: usize, len: usize) -> ANode {
+        let idx = NodeIdx::new();
+        let value = Slice::compute(&node, start, len);
+        let nodes = vec![node];
+        let node  = Slice(idx, nodes, (start, len), Computation::pooled(value));
+        ANode::new(Rc::new(node))
+    }
+
+    fn compute(node: &ANode, start: usize, len: usize) -> MPVec {
+        let v = node.value();
+        let mut out = allocate_vec(len);
+        out.clone_from_slice(&v[start..(start+len)]);
+        out
+    }
+}
+
+impl Node for Slice {
+    #[inline]
+    fn get_id(&self) -> NodeIdx { self.0 }
+
+    fn get_children(&self) -> Option<&[ANode]> { 
+        Some(self.1.as_slice())
+    }
+
+    fn is_leaf(&self) -> bool { false }
+
+    fn value(&self) -> &[DType] {
+        &self.3.get()
+    }
+
+    fn requires_grad(&self) -> bool { false }
+
+    fn compute_grad(&self, grad: &[DType], child_grads: &mut [MPVec]) {
+        let (start, len) = self.2;
+        let child = &mut child_grads[0][start..(start+len)];
+        child.iter_mut().zip(grad.iter()).for_each(|(ci, gi)| {
+            *ci += gi;
+        });
+    }
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1095,6 +1192,38 @@ mod tests {
         assert_eq!(x_grad, &[4f32, 0f32]);
         assert_eq!(y_grad, &[0f32, 2f32]);
     }
+
+    #[test]
+    fn test_concat() {
+        let x = Variable::new(vec![1., 2.]);
+        let y = Variable::new(vec![3., 5.]);
+
+        let mut out = vec![&x, &y].concat();
+        out = out + 10f32;
+
+        let mut graph = Graph::new();
+        graph.backward(&out);
+
+        let x_grad = graph.get_grad(&x).unwrap();
+        let y_grad = graph.get_grad(&y).unwrap();
+        assert_eq!(x_grad, &[1., 1.]);
+        assert_eq!(y_grad, &[1., 1.]);
+    }
+
+    #[test]
+    fn test_slice() {
+        let x = Variable::new(vec![1., 2., 3.]);
+
+        let x_slice = x.slice(1, 2);
+        let mut out = x_slice * 2.;
+
+        let mut graph = Graph::new();
+        graph.backward(&out);
+
+        let x_grad = graph.get_grad(&x).unwrap();
+        assert_eq!(x_grad, &[0., 2., 2.]);
+    }
+
 
     #[test]
     fn test_backward_pass_simple1() {
