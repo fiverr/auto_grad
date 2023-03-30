@@ -5,7 +5,7 @@ fn vec_ops(c: &mut Criterion) {
     let dims = 100;
     let mut embeddings = Vec::new();
 
-    for i in 0..1000 {
+    for i in 0..100000 {
         let mut row = Vec::with_capacity(dims);
         for dim in 0..dims {
             row.push((i*dim) as f32);
