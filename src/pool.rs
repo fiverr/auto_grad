@@ -1,9 +1,6 @@
-use lazy_static::lazy_static;
-
 use hashbrown::HashMap;
 use std::convert::{AsRef, AsMut};
 use std::cell::RefCell;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool,Ordering};
 use std::ops::{Drop,Deref,DerefMut};
 

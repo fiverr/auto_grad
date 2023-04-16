@@ -937,22 +937,13 @@ impl Node for Concat {
     }
 }
 
-pub(crate) struct Slice(NodeIdx, Vec<ANode>, (usize, usize), Computation);
+pub(crate) struct Slice(NodeIdx, [ANode; 1], (usize, usize));
 
 impl Slice {
     pub(crate) fn new(node: ANode, start: usize, len: usize) -> ANode {
         let idx = NodeIdx::new();
-        let value = Slice::compute(&node, start, len);
-        let nodes = vec![node];
-        let node  = Slice(idx, nodes, (start, len), Computation::pooled(value));
-        ANode::new(Rc::new(node))
-    }
-
-    fn compute(node: &ANode, start: usize, len: usize) -> MPVec {
-        let v = node.value();
-        let mut out = allocate_vec(len);
-        out.clone_from_slice(&v[start..(start+len)]);
-        out
+        let slice  = Slice(idx, [node], (start, len));
+        ANode::new(Rc::new(slice))
     }
 }
 
@@ -967,7 +958,8 @@ impl Node for Slice {
     fn is_leaf(&self) -> bool { false }
 
     fn value(&self) -> &[DType] {
-        &self.3.get()
+        let (start, len) = self.2;
+        &self.1[0].value()[start..(start+len)]
     }
 
     fn requires_grad(&self) -> bool { false }
