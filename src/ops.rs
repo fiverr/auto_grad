@@ -599,6 +599,51 @@ impl Node for Sin {
     }
 }
 
+pub(crate) struct Tanh(NodeIdx, [ANode;1], Computation);
+
+impl Tanh {
+    pub(crate) fn new(vec: ANode) -> ANode {
+        let idx = NodeIdx::new();
+        let value = Tanh::compute(&vec);
+        let node = Tanh(idx, [vec], Computation::pooled(value));
+        ANode::new(Rc::new(node))
+    }
+
+    fn compute(left: &ANode) -> MPVec {
+        let lv = left.value();
+        let mut out = allocate_vec(lv.len());
+        out.iter_mut().zip(lv.iter())
+            .for_each(|(oi, lvi)| *oi = lvi.tanh());
+        out
+    }
+
+}
+
+impl Node for Tanh {
+    #[inline]
+    fn get_id(&self) -> NodeIdx { self.0 }
+
+    fn get_children(&self) -> Option<&[ANode]> { 
+        Some(self.1.as_slice())
+    }
+
+    fn is_leaf(&self) -> bool { false }
+
+    fn value(&self) -> &[DType] {
+        &self.2.get()
+    }
+
+    fn requires_grad(&self) -> bool { false }
+
+    fn compute_grad(&self, grad: &[DType], child_grads: &mut [MPVec]) {
+        let x = self.2.get();
+        let out = &mut child_grads[0];
+        out.iter_mut().zip(grad.iter().zip(x.iter())).for_each(|(oi, (gi, xi))| {
+            *oi = *gi * (1f32 - xi.powf(2.))
+        });
+    }
+}
+
 pub(crate) struct Ln(NodeIdx, [ANode;1], Computation);
 
 impl Ln {
@@ -1118,12 +1163,23 @@ mod tests {
     }
 
     #[test]
+    fn test_tanh() {
+        let x = Variable::new(vec![0., 1., 2.]);
+        let out = (&x).tanh();
+        assert_eq!(out.value(), &[0., 1f32.tanh(), 2f32.tanh()]);
+        let mut graph = Graph::new();
+        graph.backward(&out);
+        let grad = graph.get_grad(&x).unwrap();
+        assert_eq!(grad, &[1., (1f32 - 1f32.tanh().powf(2f32)), (1f32 - 2f32.tanh().powf(2f32))]);
+    }
+
+    #[test]
     fn test_exp() {
         let x = Variable::new(vec![0., 1., 2.]);
         let out = (&x).exp();
         let mut graph = Graph::new();
         graph.backward(&out);
-        let grad = graph.get_grad(&x);
+        let grad = graph.get_grad(&x).unwrap();
         assert_eq!(out.value(), &[1., 1f32.exp(), 2f32.exp()]);
     }
 

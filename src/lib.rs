@@ -71,6 +71,10 @@ impl ANode {
         Cos::new(self.clone())
     }
 
+    pub fn tanh(&self) -> ANode {
+        Tanh::new(self.clone())
+    }
+
     pub fn exp(&self) -> ANode {
         Exp::new(self.clone())
     }
