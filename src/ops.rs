@@ -201,13 +201,13 @@ impl <'a> Updater<'a> {
     }
 }
 
-pub(crate) struct AddN(NodeIdx, Vec<ANode>, Computation);
+pub(crate) struct AddN(NodeIdx, [ANode; 2], Computation);
 
 impl AddN {
     pub(crate) fn new(left: ANode, right: ANode) -> ANode {
         let idx = NodeIdx::new();
         let value = AddN::compute(&left, &right);
-        let node = AddN(idx, vec![left, right], Computation::pooled(value));
+        let node = AddN(idx, [left, right], Computation::pooled(value));
         ANode::new(Rc::new(node))
     }
 
@@ -250,13 +250,13 @@ impl Node for AddN {
 
 }
 
-pub(crate) struct Subtract(NodeIdx, Vec<ANode>, Computation);
+pub(crate) struct Subtract(NodeIdx, [ANode;2], Computation);
 
 impl Subtract {
     pub(crate) fn new(left: ANode, right: ANode) -> ANode {
         let idx = NodeIdx::new();
         let value = Subtract::compute(&left, &right);
-        let node = Subtract(idx, vec![left, right], Computation::pooled(value));
+        let node = Subtract(idx, [left, right], Computation::pooled(value));
         ANode::new(Rc::new(node))
     }
 
@@ -299,13 +299,13 @@ impl Node for Subtract {
 
 }
 
-pub(crate) struct Multiply(NodeIdx, Vec<ANode>, Computation);
+pub(crate) struct Multiply(NodeIdx, [ANode; 2], Computation);
 
 impl Multiply {
     pub(crate) fn new(left: ANode, right: ANode) -> ANode {
         let idx = NodeIdx::new();
         let value = Multiply::compute(&left, &right);
-        let node = Multiply(idx, vec![left, right], Computation::pooled(value));
+        let node = Multiply(idx, [left, right], Computation::pooled(value));
         ANode::new(Rc::new(node))
     }
 
@@ -355,13 +355,13 @@ impl Node for Multiply {
 
 }
 
-pub(crate) struct Divide(NodeIdx, Vec<ANode>, Computation);
+pub(crate) struct Divide(NodeIdx, [ANode; 2], Computation);
 
 impl Divide {
     pub(crate) fn new(left: ANode, right: ANode) -> ANode {
         let idx = NodeIdx::new();
         let value = Divide::compute(&left, &right);
-        let node = Divide(idx, vec![left, right], Computation::pooled(value));
+        let node = Divide(idx, [left, right], Computation::pooled(value));
         ANode::new(Rc::new(node))
     }
 
@@ -409,13 +409,13 @@ impl Node for Divide {
 
 }
 
-pub(crate) struct Power(NodeIdx, Vec<ANode>, Computation);
+pub(crate) struct Power(NodeIdx, [ANode;2], Computation);
 
 impl Power {
     pub(crate) fn new(base: ANode, exp: ANode) -> ANode {
         let idx = NodeIdx::new();
         let value = Power::compute(&base, &exp);
-        let node = Power(idx, vec![base, exp], Computation::pooled(value));
+        let node = Power(idx, [base, exp], Computation::pooled(value));
         ANode::new(Rc::new(node))
     }
 
@@ -469,13 +469,13 @@ impl Node for Power {
 
 }
 
-pub(crate) struct SumVec(NodeIdx, Vec<ANode>, Computation);
+pub(crate) struct SumVec(NodeIdx, [ANode; 1], Computation);
 
 impl SumVec {
     pub(crate) fn new(vec: ANode) -> ANode {
         let idx = NodeIdx::new();
         let value = SumVec::compute(&vec);
-        let node = SumVec(idx, vec![vec], Computation::pooled(value));
+        let node = SumVec(idx, [vec], Computation::pooled(value));
         ANode::new(Rc::new(node))
     }
 
@@ -512,13 +512,13 @@ impl Node for SumVec {
     }
 }
 
-pub(crate) struct Cos(NodeIdx, Vec<ANode>, Computation);
+pub(crate) struct Cos(NodeIdx, [ANode;1], Computation);
 
 impl Cos {
     pub(crate) fn new(vec: ANode) -> ANode {
         let idx = NodeIdx::new();
         let value = Cos::compute(&vec);
-        let node = Cos(idx, vec![vec], Computation::pooled(value));
+        let node = Cos(idx, [vec], Computation::pooled(value));
         ANode::new(Rc::new(node))
     }
 
@@ -555,13 +555,13 @@ impl Node for Cos {
     }
 }
 
-pub(crate) struct Sin(NodeIdx, Vec<ANode>, Computation);
+pub(crate) struct Sin(NodeIdx, [ANode;1], Computation);
 
 impl Sin {
     pub(crate) fn new(vec: ANode) -> ANode {
         let idx = NodeIdx::new();
         let value = Sin::compute(&vec);
-        let node = Sin(idx, vec![vec], Computation::pooled(value));
+        let node = Sin(idx, [vec], Computation::pooled(value));
         ANode::new(Rc::new(node))
     }
 
@@ -599,13 +599,13 @@ impl Node for Sin {
     }
 }
 
-pub(crate) struct Ln(NodeIdx, Vec<ANode>, Computation);
+pub(crate) struct Ln(NodeIdx, [ANode;1], Computation);
 
 impl Ln {
     pub(crate) fn new(vec: ANode) -> ANode {
         let idx = NodeIdx::new();
         let value = Ln::compute(&vec);
-        let node = Ln(idx, vec![vec], Computation::pooled(value));
+        let node = Ln(idx, [vec], Computation::pooled(value));
         ANode::new(Rc::new(node))
     }
 
@@ -642,13 +642,13 @@ impl Node for Ln {
     }
 }
 
-pub(crate) struct Exp(NodeIdx, Vec<ANode>, Computation);
+pub(crate) struct Exp(NodeIdx, [ANode;1], Computation);
 
 impl Exp {
     pub(crate) fn new(vec: ANode) -> ANode {
         let idx = NodeIdx::new();
         let value = Exp::compute(&vec);
-        let node = Exp(idx, vec![vec], Computation::pooled(value));
+        let node = Exp(idx, [vec], Computation::pooled(value));
         ANode::new(Rc::new(node))
     }
 
@@ -685,13 +685,13 @@ impl Node for Exp {
     }
 }
 
-pub(crate) struct Negate(NodeIdx, Vec<ANode>, Computation);
+pub(crate) struct Negate(NodeIdx, [ANode;1], Computation);
 
 impl Negate {
     pub(crate) fn new(vec: ANode) -> ANode {
         let idx = NodeIdx::new();
         let value = Negate::compute(&vec);
-        let node = Negate(idx, vec![vec], Computation::pooled(value));
+        let node = Negate(idx, [vec], Computation::pooled(value));
         ANode::new(Rc::new(node))
     }
 
@@ -774,13 +774,13 @@ impl Node for BulkSum {
 }
 
 
-pub(crate) struct Maximum(NodeIdx, Vec<ANode>, Computation);
+pub(crate) struct Maximum(NodeIdx, [ANode;2], Computation);
 
 impl Maximum {
     pub(crate) fn new(left: ANode, right:ANode) -> ANode {
         let idx = NodeIdx::new();
         let value = Maximum::compute(&left, &right);
-        let node  = Maximum(idx, vec![left, right], Computation::pooled(value));
+        let node  = Maximum(idx, [left, right], Computation::pooled(value));
         ANode::new(Rc::new(node))
     }
 
@@ -830,13 +830,13 @@ impl Node for Maximum {
     }
 }
 
-pub(crate) struct Minimum(NodeIdx, Vec<ANode>, Computation);
+pub(crate) struct Minimum(NodeIdx, [ANode;2], Computation);
 
 impl Minimum {
     pub(crate) fn new(left: ANode, right:ANode) -> ANode {
         let idx = NodeIdx::new();
         let value = Minimum::compute(&left, &right);
-        let node  = Minimum(idx, vec![left, right], Computation::pooled(value));
+        let node  = Minimum(idx, [left, right], Computation::pooled(value));
         ANode::new(Rc::new(node))
     }
 
@@ -937,22 +937,13 @@ impl Node for Concat {
     }
 }
 
-pub(crate) struct Slice(NodeIdx, Vec<ANode>, (usize, usize), Computation);
+pub(crate) struct Slice(NodeIdx, [ANode; 1], (usize, usize));
 
 impl Slice {
     pub(crate) fn new(node: ANode, start: usize, len: usize) -> ANode {
         let idx = NodeIdx::new();
-        let value = Slice::compute(&node, start, len);
-        let nodes = vec![node];
-        let node  = Slice(idx, nodes, (start, len), Computation::pooled(value));
-        ANode::new(Rc::new(node))
-    }
-
-    fn compute(node: &ANode, start: usize, len: usize) -> MPVec {
-        let v = node.value();
-        let mut out = allocate_vec(len);
-        out.clone_from_slice(&v[start..(start+len)]);
-        out
+        let slice  = Slice(idx, [node], (start, len));
+        ANode::new(Rc::new(slice))
     }
 }
 
@@ -967,7 +958,8 @@ impl Node for Slice {
     fn is_leaf(&self) -> bool { false }
 
     fn value(&self) -> &[DType] {
-        &self.3.get()
+        let (start, len) = self.2;
+        &self.1[0].value()[start..(start+len)]
     }
 
     fn requires_grad(&self) -> bool { false }
