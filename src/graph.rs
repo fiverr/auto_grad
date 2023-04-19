@@ -1,4 +1,5 @@
 use std::rc::Rc;
+use std::ops::Add;
 
 use hashbrown::HashMap;
 use hashbrown::hash_map::Entry;
@@ -38,6 +39,17 @@ impl Graph {
     #[inline]
     pub fn clear_memory(&mut self) {
         self.gradients.clear();
+    }
+
+    pub fn stats(&self, node: &ANode) -> GraphStats {
+        let stats = GraphStats::new(1, node.value().len());
+        if let Some(children) = node.get_children() {
+            children.iter()
+                .map(|cn| self.stats(cn))
+                .fold(stats, |acc, x| acc + x)
+        } else {
+            stats
+        }
     }
 
     fn get_or_create_grad(&mut self, node: &ANode) -> MPVec {
@@ -162,3 +174,47 @@ impl Node for Run {
     }
 }
 
+#[derive(Clone,Copy,Debug)]
+pub struct GraphStats {
+    ops: usize,
+    memory: usize
+}
+
+impl GraphStats {
+    fn new(ops: usize, memory: usize) -> Self {
+        GraphStats {ops, memory}
+    }
+
+    fn zero() -> Self {
+        GraphStats::new(0, 0)
+    }
+}
+
+impl Add for GraphStats {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self {
+        Self {
+            ops: self.ops + other.ops,
+            memory: self.memory + other.memory,
+        }
+    }
+}
+
+
+#[cfg(test)]
+mod graph_tests {
+    use super::*;
+    use crate::*;
+
+    #[test]
+    fn test_add() {
+        let x = Variable::new(vec![0., 1.]);
+        let y = Variable::new(vec![2., 3.]);
+        let res = x + y;
+        let graph = Graph::new();
+        let stats = graph.stats(&res);
+        assert_eq!(stats.ops, 3);
+        assert_eq!(stats.memory, 6);
+    }
+}
