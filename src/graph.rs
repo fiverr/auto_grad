@@ -112,7 +112,7 @@ impl Graph {
         unsafe {
             let mut s = &mut *space.get();
             s.resize(size, 0.);
-            s.fill(0.);
+            (&mut s[..size]).fill(0.);
         }
 
         let mut offset = 0;
