@@ -38,12 +38,12 @@ pub trait Node {
 
     fn get_children(&self) -> Option<&[ANode]>;
 
-    #[inline]
     fn value(&self) -> &[DType];
 
     fn requires_grad(&self) -> bool;
 
-    fn compute_grad(&self, _grad: &[DType], _results: &mut [MPVec]) { }
+    //fn compute_grad(&self, _grad: &[DType], _results: &mut [MPVec]) { }
+    fn compute_grad(&self, _grad: &[DType], _results: &mut [&mut [DType]]) { }
 
 }
 
@@ -86,6 +86,11 @@ impl ANode {
     pub fn slice(&self, start: usize, len: usize) -> ANode {
         Slice::new(self.clone(), start, len)
     }
+
+    fn require_grad(self) -> ANode {
+        ANode(Rc::new(RequiresGrad::new(self.0)))
+    }
+
 }
 
 trait FromConstant {

@@ -43,10 +43,12 @@ impl MemoryPool {
     }
 }
 
+#[inline]
 pub fn use_shared_pool(use_pool: bool) {
     USE_POOL.store(use_pool, Ordering::SeqCst);
 }
 
+#[inline]
 fn should_use_pool() -> bool {
     USE_POOL.load(Ordering::Relaxed)
 }

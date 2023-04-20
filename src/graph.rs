@@ -1,6 +1,7 @@
 use std::rc::Rc;
 use std::ops::Add;
 
+use std::cell::UnsafeCell;
 use hashbrown::HashMap;
 use hashbrown::hash_map::Entry;
 use crate::{DType,ANode,NodeIdx,Node};
@@ -72,13 +73,16 @@ impl Graph {
     }
 
     #[inline]
-    fn add_or_update_grad(&mut self, node: &ANode, grad: MPVec) {
+    fn add_or_update_grad(&mut self, node: &ANode, grad: &mut [f32]) {
         match self.gradients.entry(node.get_id()) {
             Entry::Occupied(mut entry) => {
-                iadd(entry.get_mut(), grad.as_slice());
+                iadd(entry.get_mut(), grad);
             },
             Entry::Vacant(mut entry) => {
-                entry.insert(grad);
+                let mut v = allocate_vec(0);
+                v.extend_from_slice(grad);
+
+                entry.insert(v);
             }
         }
     }
@@ -93,20 +97,41 @@ impl Graph {
         // Allocate once
         let mut temp_grads = Vec::new();
         self.add_grad(&out, z_grad);
-        self.recurse(&out, &mut temp_grads);
+        let mut space = UnsafeCell::new(Vec::new());
+        self.recurse(&out, &mut temp_grads, &mut space);
     }
 
-     fn recurse(&mut self, node: &ANode, temp_grads: &mut Vec<MPVec>) {
+    fn get_mut_slices<'a,'b>(
+        &self,
+        nodes: &[ANode],
+        space: &UnsafeCell<Vec<DType>>, 
+        buff: &mut Vec<&'a mut [DType]>
+    ) {
+        buff.clear();
+        let size = nodes.iter().map(|n| n.value().len()).sum::<usize>();
+        unsafe {
+            let mut s = &mut *space.get();
+            s.resize(size, 0.);
+            s.fill(0.);
+        }
+
+        let mut offset = 0;
+        for node in nodes {
+            let len = node.value().len();
+            unsafe {
+                buff.push(&mut (*space.get())[offset..offset+len]);
+            }
+            offset += len;
+        }
+    }
+
+    fn recurse(&mut self, node: &ANode, temp_grads: &mut Vec<&mut [DType]>, space: &UnsafeCell<Vec<DType>>) {
         if !node.is_leaf() {
             let node_grad = self.get_or_create_grad(node);
             if let Some(children) = node.get_children() {
-                temp_grads.clear();
-                // Grab gradients
+                self.get_mut_slices(children, space, temp_grads);
 
-                temp_grads.extend(children.iter()
-                    .map(|c| self.get_temp_space(c.value().len())));
-
-                node.compute_grad(&node_grad, temp_grads);
+                node.compute_grad(&node_grad, temp_grads.as_mut_slice());
 
                 if self.nan_check {
                     for (i, grad) in temp_grads.iter().enumerate() {
@@ -132,11 +157,13 @@ impl Graph {
 
                 // Run children
                 for child in children.iter() {
-                    self.recurse(child, temp_grads);
+                    self.recurse(child, temp_grads, space);
                 }
 
             } else {
-                self.add_grad(node, node_grad);
+                if node.requires_grad() {
+                    self.add_grad(node, node_grad);
+                }
             }
         }
     }
@@ -168,7 +195,7 @@ impl Node for Run {
 
     fn requires_grad(&self) -> bool { false }
 
-    fn compute_grad(&self, grad: &[DType], results: &mut [MPVec]) {
+    fn compute_grad(&self, grad: &[DType], results: &mut [&mut [DType]]) {
         let mut out = &mut results[0];
         out.fill(1f32);
     }

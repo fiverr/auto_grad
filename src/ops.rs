@@ -37,6 +37,38 @@ impl Computation {
     }
 }
 
+pub struct RequiresGrad(Rc<dyn Node>);
+
+impl RequiresGrad {
+    pub fn new(n: Rc<dyn Node>) -> Self {
+        RequiresGrad(n)
+    }
+}
+
+impl Node for RequiresGrad {
+    #[inline]
+    fn get_id(&self) -> NodeIdx { self.0.get_id() }
+
+    #[inline]
+    fn is_leaf(&self) -> bool { self.0.is_leaf() }
+
+    #[inline]
+    fn value(&self) -> &[DType] {
+        &self.0.value()
+    }
+
+    #[inline]
+    fn get_children(&self) -> Option<&[ANode]> { self.0.get_children() }
+
+    #[inline]
+    fn requires_grad(&self) -> bool { true }
+
+    #[inline]
+    fn compute_grad(&self, grad: &[DType], child_grads: &mut [&mut [DType]]) {
+        self.0.compute_grad(grad, child_grads)
+    }
+}
+
 pub struct Variable(NodeIdx, Computation);
 
 impl Variable {
@@ -82,7 +114,7 @@ impl Node for Variable {
     fn requires_grad(&self) -> bool { true }
 
     #[inline]
-    fn compute_grad(&self, _grad: &[DType], _child_grads: &mut [MPVec]) {
+    fn compute_grad(&self, _grad: &[DType], _child_grads: &mut [&mut [DType]]) {
         // Pass
     }
 }
@@ -237,7 +269,7 @@ impl Node for AddN {
 
     fn requires_grad(&self) -> bool { false }
 
-    fn compute_grad(&self, grad: &[DType], child_grads: &mut [MPVec]) {
+    fn compute_grad(&self, grad: &[DType], child_grads: &mut [&mut [DType]]) {
         // f(x,y) = x + y
         // df(x,y)/dx = 1
         // df(x,y)/dy = 1
@@ -286,7 +318,7 @@ impl Node for Subtract {
 
     fn requires_grad(&self) -> bool { false }
 
-    fn compute_grad(&self, grad: &[DType], child_grads: &mut [MPVec]) {
+    fn compute_grad(&self, grad: &[DType], child_grads: &mut [&mut [DType]]) {
         // f(x,y) = x - y
         // df(x,y)/dx = 1
         // df(x,y)/dy = -1
@@ -335,7 +367,7 @@ impl Node for Multiply {
 
     fn requires_grad(&self) -> bool { false }
 
-    fn compute_grad(&self, grad: &[DType], child_grads: &mut [MPVec]) {
+    fn compute_grad(&self, grad: &[DType], child_grads: &mut [&mut [DType]]) {
         // f(x,y) = x * y
         // df(x,y)/dx = y
         // df(x,y)/dy = x
@@ -391,7 +423,7 @@ impl Node for Divide {
 
     fn requires_grad(&self) -> bool { false }
 
-    fn compute_grad(&self, grad: &[DType], child_grads: &mut [MPVec]) {
+    fn compute_grad(&self, grad: &[DType], child_grads: &mut [&mut [DType]]) {
         // f(x,y) = x / y
         let x = self.1[0].value();
         let y = self.1[1].value();
@@ -445,7 +477,7 @@ impl Node for Power {
 
     fn requires_grad(&self) -> bool { false }
 
-    fn compute_grad(&self, grad: &[DType], child_grads: &mut [MPVec]) {
+    fn compute_grad(&self, grad: &[DType], child_grads: &mut [&mut [DType]]) {
         // f(x,y) = x ^ y
         // df(x,y)/dx = y * x ^ (y - 1)
         // df(x,y)/dy = ln(y) * x ^ y
@@ -503,7 +535,7 @@ impl Node for SumVec {
 
     fn requires_grad(&self) -> bool { false }
 
-    fn compute_grad(&self, grad: &[DType], child_grads: &mut [MPVec]) {
+    fn compute_grad(&self, grad: &[DType], child_grads: &mut [&mut [DType]]) {
         // f(x) = x.sum()
         // df(x)/dx_1 = 1;
         for out in child_grads.iter_mut() {
@@ -546,7 +578,7 @@ impl Node for Cos {
 
     fn requires_grad(&self) -> bool { false }
 
-    fn compute_grad(&self, grad: &[DType], child_grads: &mut [MPVec]) {
+    fn compute_grad(&self, grad: &[DType], child_grads: &mut [&mut [DType]]) {
         let x = self.1[0].value();
         let out = &mut child_grads[0];
         out.iter_mut().zip(grad.iter().zip(x.iter())).for_each(|(oi, (gi, xi))| {
@@ -590,7 +622,7 @@ impl Node for Sin {
 
     fn requires_grad(&self) -> bool { false }
 
-    fn compute_grad(&self, grad: &[DType], child_grads: &mut [MPVec]) {
+    fn compute_grad(&self, grad: &[DType], child_grads: &mut [&mut [DType]]) {
         let x = self.1[0].value();
         let out = &mut child_grads[0];
         out.iter_mut().zip(grad.iter().zip(x.iter())).for_each(|(oi, (gi, xi))| {
@@ -635,7 +667,7 @@ impl Node for Tanh {
 
     fn requires_grad(&self) -> bool { false }
 
-    fn compute_grad(&self, grad: &[DType], child_grads: &mut [MPVec]) {
+    fn compute_grad(&self, grad: &[DType], child_grads: &mut [&mut [DType]]) {
         let x = self.2.get();
         let out = &mut child_grads[0];
         out.iter_mut().zip(grad.iter().zip(x.iter())).for_each(|(oi, (gi, xi))| {
@@ -678,7 +710,7 @@ impl Node for Ln {
 
     fn requires_grad(&self) -> bool { false }
 
-    fn compute_grad(&self, grad: &[DType], child_grads: &mut [MPVec]) {
+    fn compute_grad(&self, grad: &[DType], child_grads: &mut [&mut [DType]]) {
         let x = self.1[0].value();
         let out = &mut child_grads[0];
         out.iter_mut().zip(grad.iter().zip(x.iter())).for_each(|(oi, (gi, xi))| {
@@ -722,7 +754,7 @@ impl Node for Exp {
 
     fn requires_grad(&self) -> bool { false }
 
-    fn compute_grad(&self, grad: &[DType], child_grads: &mut [MPVec]) {
+    fn compute_grad(&self, grad: &[DType], child_grads: &mut [&mut [DType]]) {
         let x = self.value();
         let mut out = &mut child_grads[0];
         out.clone_from_slice(x);
@@ -765,7 +797,7 @@ impl Node for Negate {
 
     fn requires_grad(&self) -> bool { false }
 
-    fn compute_grad(&self, grad: &[DType], child_grads: &mut [MPVec]) {
+    fn compute_grad(&self, grad: &[DType], child_grads: &mut [&mut [DType]]) {
         child_grads[0].iter_mut().zip(grad.iter()).for_each(|(oi, gi)| {
             *oi = -*gi;
         });
@@ -809,7 +841,7 @@ impl Node for BulkSum {
 
     fn requires_grad(&self) -> bool { false }
 
-    fn compute_grad(&self, grad: &[DType], child_grads: &mut [MPVec]) {
+    fn compute_grad(&self, grad: &[DType], child_grads: &mut [&mut [DType]]) {
         // Just the gradient for each, easy peasy
         let x = self.value();
         for out in child_grads.iter_mut() {
@@ -855,7 +887,7 @@ impl Node for Maximum {
 
     fn requires_grad(&self) -> bool { false }
 
-    fn compute_grad(&self, grad: &[DType], child_grads: &mut [MPVec]) {
+    fn compute_grad(&self, grad: &[DType], child_grads: &mut [&mut [DType]]) {
         // f(x,y) = x.max(y)
         let left = self.1[0].value();
         let right = self.1[1].value();
@@ -911,7 +943,7 @@ impl Node for Minimum {
 
     fn requires_grad(&self) -> bool { false }
 
-    fn compute_grad(&self, grad: &[DType], child_grads: &mut [MPVec]) {
+    fn compute_grad(&self, grad: &[DType], child_grads: &mut [&mut [DType]]) {
         // f(x,y) = x.max(y)
         let left = self.1[0].value();
         let right = self.1[1].value();
@@ -971,7 +1003,7 @@ impl Node for Concat {
 
     fn requires_grad(&self) -> bool { false }
 
-    fn compute_grad(&self, grad: &[DType], child_grads: &mut [MPVec]) {
+    fn compute_grad(&self, grad: &[DType], child_grads: &mut [&mut [DType]]) {
         let mut i = 0;
         for cg in child_grads.iter_mut() {
             cg.iter_mut().for_each(|cgi| {
@@ -1009,7 +1041,7 @@ impl Node for Slice {
 
     fn requires_grad(&self) -> bool { false }
 
-    fn compute_grad(&self, grad: &[DType], child_grads: &mut [MPVec]) {
+    fn compute_grad(&self, grad: &[DType], child_grads: &mut [&mut [DType]]) {
         let (start, len) = self.2;
         let child = &mut child_grads[0][start..(start+len)];
         child.iter_mut().zip(grad.iter()).for_each(|(ci, gi)| {
