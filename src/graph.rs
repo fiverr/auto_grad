@@ -79,8 +79,8 @@ impl Graph {
                 iadd(entry.get_mut(), grad);
             },
             Entry::Vacant(mut entry) => {
-                let mut v = allocate_vec(0);
-                v.extend_from_slice(grad);
+                let mut v = allocate_vec(grad.len());
+                v[..].clone_from_slice(grad);
 
                 entry.insert(v);
             }
