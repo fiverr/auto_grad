@@ -111,7 +111,9 @@ impl Graph {
         let size = nodes.iter().map(|n| n.value().len()).sum::<usize>();
         unsafe {
             let mut s = &mut *space.get();
-            s.resize(size, 0.);
+            while s.len() < size + 1 {
+                s.push(0.);
+            }
             (&mut s[..size]).fill(0.);
         }
 
