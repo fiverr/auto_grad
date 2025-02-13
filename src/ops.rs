@@ -1,7 +1,7 @@
 use std::rc::Rc;
 
 use crate::*;
-use crate::vecops::{add, iadd, sub, isub, mul, imul, div};
+use crate::vecops::*;
 use crate::pool::{MPVec,allocate_vec};
 
 enum Data {
@@ -167,6 +167,26 @@ impl <'a> Broadcast<'a> {
         Broadcast::sized(vec, other.len())
     }
 
+    fn get_size(left: &[DType], right: &[DType]) -> usize {
+        let l_len = left.len();
+        let r_len = right.len();
+        match (l_len, r_len) {
+            (l, r) if l == 0 || r == 0 => {
+                panic!("Input vector is zero!");
+            },
+            (l, r) if l == r => l_len,
+            (1, r) => r_len,
+            (l, 1) => l_len,
+            (_, _) => {
+                panic!("Input vectors mismatched is zero!");
+            }
+        }
+    }
+
+    fn allocate_out(left: &[DType], right: &[DType]) -> MPVec {
+        allocate_vec(Broadcast::get_size(left, right))
+    }
+
     fn sized(vec: &'a [DType], other: usize) -> Self {
         if vec.len() == 1 || vec.len() == other {
             Broadcast { vec, remaining: other, len: other }
@@ -229,6 +249,96 @@ impl <'a> Updater<'a> {
                 *self.data.get_unchecked_mut(self.cur_idx) += v;
             }
             self.cur_idx += 1;
+        }
+    }
+}
+
+macro_rules! to_output {
+    ($out:tt, $len:expr) => {
+        if $out.len() == $len {
+            ArrayOutput($out)
+        } else if $out.len() == 1 {
+            BroadcastOutput($out)
+        } else {
+            panic!("Output is incompatible with input");
+        }
+    }
+}
+
+macro_rules! run_unary_op {
+    ($left:tt, $out:tt, $func:expr) => {
+        let left_len = $left.len();
+        let out_len = $out.len();
+        if left_len == out_len {
+            $func(ArrayInput($left), ArrayOutput($out));
+        } else if left_len == 1 {
+            $func(BroadcastInput($left[0], out_len), ArrayOutput($out));
+        } else if out_len == 1 {
+            $func(ArrayInput($left[0], out_len), BroadcastOutput($out:tt, left_len));
+        } else {
+            panic!("Left length: {}, Output Length: {}", left_len, out_len);
+        }
+    }
+}
+
+macro_rules! to_output {
+    ($out:tt, $len:expr, $body:expr) => {
+        if $out.len() == $len {
+            $body(ArrayOutput($out));
+        } else if $out.len() == 1 {
+            $body(BroadcastOutput($out, $len));
+        } else {
+            panic!("Output is incompatible with input");
+        }
+    }
+}
+
+macro_rules! run_binary_op {
+    ($left:tt, $right:tt, $out:tt, $func:expr) => {
+        let left_len = $left.len();
+        let right_len = $right.len();
+        let max_len = left_len.max(right_len);
+        unsafe {
+            to_output!($out, max_len, |output| {
+                if left_len == right_len {
+                    $func(ArrayInput($left), ArrayInput($right), output);
+                } else if left_len == 1 {
+                    $func(BroadcastInput($left, right_len), ArrayInput($right), output);
+                } else if right_len == 1 {
+                    $func(ArrayInput($left), BroadcastInput($right, left_len), output);
+                } else {
+                    panic!("Left length: {}, Right Length: {}", left_len, right_len);
+                }
+            });
+        }
+    }
+}
+
+macro_rules! run_trinary_op {
+    ($x:tt, $y:tt, $z:tt, $out:tt, $func:expr) => {
+        let x_len = $x.len();
+        let y_len = $y.len();
+        let z_len = $z.len();
+        let max_len = x_len.max(y_len).max(z_len);
+        unsafe {
+            to_output!($out, max_len, |output| {
+                if x_len > 0 && x_len == y_len && y_len == z_len {
+                    $func(ArrayInput($x), ArrayInput($y), ArrayInput($z), output);
+                } else {
+                    match (x_len, y_len, z_len) {
+                        (1, a, b) if a == b => {
+                            $func(BroadcastInput($x, max_len), ArrayInput($y), ArrayInput($z), output)
+                        },
+                        (a, 1, b) if a == b => {
+                            $func(ArrayInput($x), BroadcastInput($y, max_len), ArrayInput($z), output)
+                        },
+                        (a, b, 1) if a == b => {
+                            $func(ArrayInput($x), ArrayInput($y), BroadcastInput($z, max_len), output)
+                        },
+                        _ => panic!("x: {}, y: {}, z: {}", x_len, y_len, z_len)
+                    }
+                }
+            });
         }
     }
 }
@@ -342,11 +452,10 @@ impl Multiply {
     }
 
     fn compute(left: &ANode, right: &ANode) -> MPVec {
-        let (lv, rv) = Broadcast::from_pair(left.value(), right.value());
-        let mut out = allocate_vec(lv.len);
-        out.iter_mut().zip(lv.zip(rv)).for_each(|(oi, (lvi, rvi))| {
-            *oi = lvi * rvi
-        });
+        let (x, y) = (left.value(), right.value());
+        let mut out = Broadcast::allocate_out(x, y);
+        let o = &mut out;
+        run_binary_op!(x, y, o, simd_mul);
         out
     }
 }
@@ -374,15 +483,13 @@ impl Node for Multiply {
         let x = self.1[0].value();
         let y = self.1[1].value();
 
-        // x.len() = 1, x_grad.len() = 1, y.len() == 3, y_grad.len() = 3, grad.len() = 3
-        let mut ly  = Broadcast::sized(y, child_grads[0].len());
-        let mut out = Updater::new(&mut child_grads[0], grad.len());
-        grad.iter().zip(ly).for_each(|(gi, yi)| out.add(*gi * *yi));
+        // df(x,y)/dx = y
+        let cg = &mut child_grads[0];
+        run_binary_op!(grad, y, cg, simd_mul);
 
-        let mut lx  = Broadcast::sized(x, child_grads[1].len());
-        let mut out = Updater::new(&mut child_grads[1], grad.len());
-        grad.iter().zip(lx).for_each(|(gi, xi)| out.add(*gi * *xi));
-
+        // df(x,y)/dy = x
+        let cg = &mut child_grads[1];
+        run_binary_op!(grad, x, cg, simd_mul);
     }
 
 }
@@ -398,11 +505,11 @@ impl Divide {
     }
 
     fn compute(left: &ANode, right: &ANode) -> MPVec {
-        let (lv, rv) = Broadcast::from_pair(left.value(), right.value());
-        let mut out = allocate_vec(lv.len);
-        out.iter_mut().zip(lv.zip(rv)).for_each(|(oi, (lvi, rvi))| {
-            *oi = lvi / rvi
-        });
+        let x = left.value();
+        let y = right.value();
+        let mut out = Broadcast::allocate_out(x, y);
+        let o = &mut out;
+        run_binary_op!(x, y, o, simd_div);
         out
     }
 }
@@ -429,14 +536,24 @@ impl Node for Divide {
         let y = self.1[1].value();
         
         // df(x,y)/dx = 1 / y
-        let mut ly  = Broadcast::sized(y, child_grads[0].len());
+        let out = &mut child_grads[0];
+        run_binary_op!(grad, y, out, grad_div_x);
+
+        /*
+        let ly  = Broadcast::sized(y, child_grads[0].len());
         let mut out = Updater::new(&mut child_grads[0], grad.len());
         grad.iter().zip(ly).for_each(|(gi, yi)| out.add(*gi / *yi));
+        */
+
+        let out = &mut child_grads[1];
+        run_trinary_op!(grad, x, y, out, grad_div_y);
 
         // df(x,y)/dy = -x / y ^ 2
+        /*
         let (lx, ly) = Broadcast::from_pair(x, y);
         let mut out = Updater::new(&mut child_grads[1], lx.len);
         grad.iter().zip(lx.zip(ly)).for_each(|(gi, (xi, yi))| out.add(*gi * -*xi / yi.powf(2f32)));
+        */
     }
 
 }
@@ -445,6 +562,15 @@ pub(crate) struct Power(NodeIdx, [ANode;2], Computation);
 
 impl Power {
     pub(crate) fn new(base: ANode, exp: ANode) -> ANode {
+        if exp.is_leaf() && !exp.requires_grad() {
+            let v = exp.value();
+            if v == &[2f32] {
+                return Multiply::new(base.clone(), base)
+            } else if v == &[0.5f32] {
+                return SquareRoot::new(base)
+            }
+        }
+
         let idx = NodeIdx::new();
         let value = Power::compute(&base, &exp);
         let node = Power(idx, [base, exp], Computation::pooled(value));
@@ -496,6 +622,53 @@ impl Node for Power {
         let mut out = Updater::new(&mut child_grads[1], lx.len);
         grad.iter().zip(lx.zip(ly)).for_each(|(gi, (xi, yi))| {
             out.add(*gi * yi.ln() * xi.powf(*yi));
+        });
+    }
+
+}
+
+pub(crate) struct SquareRoot(NodeIdx, [ANode;1], Computation);
+
+impl SquareRoot {
+    pub(crate) fn new(base: ANode) -> ANode {
+        let idx = NodeIdx::new();
+        let value = SquareRoot::compute(&base);
+        let node = SquareRoot(idx, [base], Computation::pooled(value));
+        ANode::new(Rc::new(node))
+    }
+
+    fn compute(left: &ANode) -> MPVec {
+        let lv = left.value();
+        let mut out = allocate_vec(lv.len());
+        out.iter_mut().zip(lv).for_each(|(oi, lvi)| {
+            *oi = lvi.sqrt();
+        });
+        out
+    }
+}
+
+impl Node for SquareRoot {
+    #[inline]
+    fn get_id(&self) -> NodeIdx { self.0 }
+
+    fn get_children(&self) -> Option<&[ANode]> { 
+        Some(self.1.as_slice())
+    }
+
+    fn is_leaf(&self) -> bool { false }
+
+    fn value(&self) -> &[DType] {
+        &self.2.get()
+    }
+
+    fn requires_grad(&self) -> bool { false }
+
+    fn compute_grad(&self, grad: &[DType], child_grads: &mut [&mut [DType]]) {
+        let x = self.1[0].value();
+
+        // df(x,y)/dx = (1/2) * x ^ 0.5
+        child_grads[0].iter_mut().zip(grad.iter().zip(x)).for_each(|(outi, (gi, xi))| {
+            *outi += *gi * 0.5 * *xi;
         });
     }
 
@@ -843,13 +1016,11 @@ impl Node for BulkSum {
 
     fn compute_grad(&self, grad: &[DType], child_grads: &mut [&mut [DType]]) {
         // Just the gradient for each, easy peasy
-        let x = self.value();
-        for out in child_grads.iter_mut() {
-            out.clone_from_slice(grad);
-        }
+        child_grads.iter_mut().for_each(|cgi| {
+            cgi.clone_from_slice(grad);
+        });
     }
 }
-
 
 pub(crate) struct Maximum(NodeIdx, [ANode;2], Computation);
 

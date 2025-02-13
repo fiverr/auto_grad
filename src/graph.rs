@@ -78,7 +78,7 @@ impl Graph {
             Entry::Occupied(mut entry) => {
                 iadd(entry.get_mut(), grad);
             },
-            Entry::Vacant(mut entry) => {
+            Entry::Vacant(entry) => {
                 let mut v = allocate_vec(grad.len());
                 v[..].clone_from_slice(grad);
 
@@ -110,7 +110,7 @@ impl Graph {
         buff.clear();
         let size = nodes.iter().map(|n| n.value().len()).sum::<usize>();
         unsafe {
-            let mut s = &mut *space.get();
+            let s = &mut *space.get();
             while s.len() < size + 1 {
                 s.push(0.);
             }
@@ -197,8 +197,8 @@ impl Node for Run {
 
     fn requires_grad(&self) -> bool { false }
 
-    fn compute_grad(&self, grad: &[DType], results: &mut [&mut [DType]]) {
-        let mut out = &mut results[0];
+    fn compute_grad(&self, _grad: &[DType], results: &mut [&mut [DType]]) {
+        let out = &mut results[0];
         out.fill(1f32);
     }
 }
@@ -212,10 +212,6 @@ pub struct GraphStats {
 impl GraphStats {
     fn new(ops: usize, memory: usize) -> Self {
         GraphStats {ops, memory}
-    }
-
-    fn zero() -> Self {
-        GraphStats::new(0, 0)
     }
 }
 
