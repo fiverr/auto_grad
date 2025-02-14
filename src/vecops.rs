@@ -168,6 +168,55 @@ unsafe fn hsum_avx_ps(v: __m256) -> f32 {
     _mm_cvtss_f32(sum_128)
 }
 
+#[inline(always)]
+pub unsafe fn _mm256_exp_ps(x: __m256) -> __m256 {
+    // Constants
+    let ln2      = _mm256_set1_ps(0.6931471805599453);        // ln(2)
+    let ln2_inv  = _mm256_set1_ps(1.4426950408889634);        // 1/ln(2)
+    
+    // Scale input by 1/ln(2)
+    let scaled   = _mm256_mul_ps(x, ln2_inv);
+    // Round scaled value to nearest integer: n = round(x/ln2)
+    let n        = _mm256_round_ps(scaled, _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
+    // r = x - n*ln2
+    let r        = _mm256_sub_ps(x, _mm256_mul_ps(n, ln2));
+
+    // Compute a polynomial approximation of exp(r):
+    // exp(r) ~ 1 + r + r²/2 + r³/6 + r⁴/24
+    let c2   = _mm256_set1_ps(1.0);              // coefficient for r
+    let c3   = _mm256_set1_ps(0.5);              // coefficient for r²: 1/2
+    let c4   = _mm256_set1_ps(0.16666667);       // coefficient for r³: 1/6
+    let c5   = _mm256_set1_ps(0.04166667);       // coefficient for r⁴: 1/24
+
+    let r2 = _mm256_mul_ps(r, r);
+    let r3 = _mm256_mul_ps(r2, r);
+    let r4 = _mm256_mul_ps(r3, r);
+
+    let poly = _mm256_add_ps(
+                    _mm256_add_ps(
+                        _mm256_add_ps(
+                            _mm256_add_ps(r, c2),
+                            _mm256_mul_ps(r2, c3)
+                        ),
+                        _mm256_mul_ps(r3, c4)
+                    ),
+                    _mm256_mul_ps(r4, c5)
+                );
+    
+    // Compute 2^n using IEEE754 bit-level conversion:
+    // First, convert n (float) to an integer
+    let int_n = _mm256_cvtps_epi32(n);
+    // For a 32-bit float, the exponent field is biased by 127.
+    // So 2^n is represented by (n + 127) << 23.
+    let bias = _mm256_set1_epi32(127);
+    let exp_int = _mm256_add_epi32(int_n, bias);
+    let exp_int = _mm256_slli_epi32(exp_int, 23);
+    let two_n = _mm256_castsi256_ps(exp_int);
+    
+    // Reconstruct exp(x) ≈ exp(r) * 2^n
+    _mm256_mul_ps(poly, two_n)
+}
+
 macro_rules! avx_detect {
     ($block:expr) => {
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
@@ -183,7 +232,7 @@ macro_rules! avx_detect {
 
 macro_rules! unary_op {
     ($fname:ident, $sim_op:expr, $fallback_op:expr) => {
-        pub unsafe fn $fname(
+        pub fn $fname(
             a: impl Input,
             mut out: impl Output
         ) {
@@ -194,12 +243,14 @@ macro_rules! unary_op {
             let mut i = 0;
 
             avx_detect! {
-                // Process in chunks of 8 floats
-                while i + 8 <= length {
-                    let va = a.fill_256(i);
-                    let res = $sim_op(va);
-                    out.store(res, i);
-                    i += 8;
+                unsafe {
+                    // Process in chunks of 8 floats
+                    while i + 8 <= length {
+                        let va = a.fill_256(i);
+                        let res = $sim_op(va);
+                        out.store(res, i);
+                        i += 8;
+                    }
                 }
             }
 
@@ -215,7 +266,7 @@ macro_rules! unary_op {
 
 macro_rules! binary_op {
     ($fname:ident, $sim_op:expr, $(&mut)? $fallback_op:expr) => {
-        pub unsafe fn $fname(
+        pub fn $fname(
             a: impl Input,
             b: impl Input,
             mut out: impl Output
@@ -228,13 +279,15 @@ macro_rules! binary_op {
             let mut i = 0;
 
             avx_detect! {
-                // Process in chunks of 8 floats
-                while i + 8 <= length {
-                    let va = a.fill_256(i);
-                    let vb = b.fill_256(i);
-                    let res = $sim_op(va, vb);
-                    out.store(res, i);
-                    i += 8;
+                unsafe {
+                    // Process in chunks of 8 floats
+                    while i + 8 <= length {
+                        let va = a.fill_256(i);
+                        let vb = b.fill_256(i);
+                        let res = $sim_op(va, vb);
+                        out.store(res, i);
+                        i += 8;
+                    }
                 }
             }
 
@@ -250,7 +303,7 @@ macro_rules! binary_op {
 
 macro_rules! trinary_op {
     ($fname:ident, $sim_op:expr, $fallback_op:expr) => {
-        pub unsafe fn $fname(
+        pub fn $fname(
             a: impl Input,
             b: impl Input,
             c: impl Input,
@@ -265,14 +318,16 @@ macro_rules! trinary_op {
             let mut i = 0;
 
             avx_detect! {
-                // Process in chunks of 8 floats
-                while i + 8 <= length {
-                    let va = a.fill_256(i);
-                    let vb = b.fill_256(i);
-                    let vc = c.fill_256(i);
-                    let res = $sim_op(va, vb, vc);
-                    out.store(res, i);
-                    i += 8;
+                unsafe {
+                    // Process in chunks of 8 floats
+                    while i + 8 <= length {
+                        let va = a.fill_256(i);
+                        let vb = b.fill_256(i);
+                        let vc = c.fill_256(i);
+                        let res = $sim_op(va, vb, vc);
+                        out.store(res, i);
+                        i += 8;
+                    }
                 }
             }
 
@@ -315,5 +370,35 @@ binary_op!(
     simd_mul,
     _mm256_mul_ps,
     |xi, yi| { xi * yi }
+);
+
+binary_op!(
+    simd_sub,
+    _mm256_sub_ps,
+    |xi, yi| { xi - yi }
+);
+
+binary_op!(
+    simd_add,
+    _mm256_add_ps,
+    |xi, yi| { xi - yi }
+);
+
+unary_op!(
+    simd_iadd,
+    |vo| {vo},
+    |xi| {xi}
+);
+
+unary_op!(
+    grad_sub_y,
+    |vo| { _mm256_xor_ps(vo, _mm256_set1_ps(-0f32))},
+    |xi: f32| {-xi}
+);
+
+unary_op!(
+    simd_exp,
+    _mm256_exp_ps,
+    |xi: f32| {xi.exp()}
 );
 

@@ -380,3 +380,17 @@ impl MinimumOps for ANode {
 convert_binops!    { impl MinimumOps, minimum for ANode, ANode }
 forward_ref_binop! { impl MinimumOps, minimum for ANode, ANode }
 
+pub trait UnaryOps {
+    fn sqrt(self) -> ANode;
+    fn sin(self) -> ANode;
+}
+
+impl UnaryOps for ANode {
+    fn sqrt(self) -> ANode {
+        SquareRoot::new(self)
+    }
+    fn sin(self) -> ANode {
+        Sin::new(self)
+    }
+
+}

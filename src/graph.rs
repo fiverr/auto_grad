@@ -81,7 +81,6 @@ impl Graph {
             Entry::Vacant(entry) => {
                 let mut v = allocate_vec(grad.len());
                 v[..].clone_from_slice(grad);
-
                 entry.insert(v);
             }
         }

@@ -272,9 +272,9 @@ macro_rules! run_unary_op {
         if left_len == out_len {
             $func(ArrayInput($left), ArrayOutput($out));
         } else if left_len == 1 {
-            $func(BroadcastInput($left[0], out_len), ArrayOutput($out));
+            $func(BroadcastInput($left, out_len), ArrayOutput($out));
         } else if out_len == 1 {
-            $func(ArrayInput($left[0], out_len), BroadcastOutput($out:tt, left_len));
+            $func(ArrayInput($left), BroadcastOutput($out, left_len));
         } else {
             panic!("Left length: {}, Output Length: {}", left_len, out_len);
         }
@@ -403,11 +403,11 @@ impl Subtract {
     }
 
     fn compute(left: &ANode, right: &ANode) -> MPVec {
-        let (lv, rv) = Broadcast::from_pair(left.value(), right.value());
-        let mut out = allocate_vec(lv.len);
-        out.iter_mut().zip(lv.zip(rv)).for_each(|(oi, (lvi, rvi))| {
-            *oi = lvi - rvi
-        });
+        let x = left.value();
+        let y = right.value();
+        let mut out = Broadcast::allocate_out(x, y);
+        let o = &mut out;
+        run_binary_op!(x, y, o, simd_sub);
         out
     }
 }
@@ -431,12 +431,12 @@ impl Node for Subtract {
     fn compute_grad(&self, grad: &[DType], child_grads: &mut [&mut [DType]]) {
         // f(x,y) = x - y
         // df(x,y)/dx = 1
-        // df(x,y)/dy = -1
-        let mut out = Updater::new(&mut child_grads[0], grad.len());
-        grad.iter().for_each(|gi| out.add(*gi));
+        let out = &mut child_grads[0];
+        run_unary_op!(grad, out, simd_iadd);
 
-        let mut out = Updater::new(&mut child_grads[1], grad.len());
-        grad.iter().for_each(|gi| out.add(-*gi));
+        // df(x,y)/dy = -1
+        let out = &mut child_grads[1];
+        run_unary_op!(grad, out, grad_sub_y);
     }
 
 }
@@ -539,21 +539,10 @@ impl Node for Divide {
         let out = &mut child_grads[0];
         run_binary_op!(grad, y, out, grad_div_x);
 
-        /*
-        let ly  = Broadcast::sized(y, child_grads[0].len());
-        let mut out = Updater::new(&mut child_grads[0], grad.len());
-        grad.iter().zip(ly).for_each(|(gi, yi)| out.add(*gi / *yi));
-        */
-
         let out = &mut child_grads[1];
+        // df(x,y)/dy = -x / y ^ 2
         run_trinary_op!(grad, x, y, out, grad_div_y);
 
-        // df(x,y)/dy = -x / y ^ 2
-        /*
-        let (lx, ly) = Broadcast::from_pair(x, y);
-        let mut out = Updater::new(&mut child_grads[1], lx.len);
-        grad.iter().zip(lx.zip(ly)).for_each(|(gi, (xi, yi))| out.add(*gi * -*xi / yi.powf(2f32)));
-        */
     }
 
 }
@@ -664,7 +653,7 @@ impl Node for SquareRoot {
     fn requires_grad(&self) -> bool { false }
 
     fn compute_grad(&self, grad: &[DType], child_grads: &mut [&mut [DType]]) {
-        let x = self.1[0].value();
+        let x = self.value();
 
         // df(x)/dx = (1/2) / x ^ 0.5
         child_grads[0].iter_mut().zip(grad.iter().zip(x)).for_each(|(outi, (gi, xi))| {
@@ -905,7 +894,9 @@ impl Exp {
     fn compute(left: &ANode) -> MPVec {
         let lv = left.value();
         let mut out = allocate_vec(lv.len());
-        out.iter_mut().zip(lv.iter()).for_each(|(oi, lvi)| *oi = lvi.exp());
+        let o = &mut out;
+        run_unary_op!(lv, o, simd_exp);
+        //out.iter_mut().zip(lv.iter()).for_each(|(oi, lvi)| *oi = lvi.exp());
         out
     }
 
@@ -1315,6 +1306,21 @@ mod tests {
     }
 
     #[test]
+    fn test_sqrt() {
+        let x = Variable::new(vec![4., 9.]);
+        let res = SquareRoot::new(x.clone());
+        assert_eq!(res.value(), &[2., 3.]);
+
+        let mut graph = Graph::new();
+        graph.backward(&res);
+
+        let x_1_g = 1f32 / (2f32 * 2f32);
+        let x_2_g = 1f32 / (2f32 * 3f32);
+        let x_grad = graph.get_grad(&x).unwrap();
+        assert_eq!(x_grad, &[x_1_g, x_2_g]);
+    }
+
+    #[test]
     fn test_div() {
         let x = Variable::new(vec![0., 1.]);
         let y = Variable::new(vec![2., 3.]);
@@ -1466,7 +1472,7 @@ mod tests {
         let x = Variable::new(vec![1., 2., 3.]);
 
         let x_slice = x.slice(1, 2);
-        let mut out = x_slice * 2.;
+        let out = x_slice * 2.;
 
         let mut graph = Graph::new();
         graph.backward(&out);
