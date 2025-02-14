@@ -666,9 +666,9 @@ impl Node for SquareRoot {
     fn compute_grad(&self, grad: &[DType], child_grads: &mut [&mut [DType]]) {
         let x = self.1[0].value();
 
-        // df(x,y)/dx = (1/2) * x ^ 0.5
+        // df(x)/dx = (1/2) / x ^ 0.5
         child_grads[0].iter_mut().zip(grad.iter().zip(x)).for_each(|(outi, (gi, xi))| {
-            *outi += *gi * 0.5 * *xi;
+            *outi += *gi * 0.5 / *xi;
         });
     }
 
