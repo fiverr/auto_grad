@@ -298,19 +298,17 @@ macro_rules! run_binary_op {
         let left_len = $left.len();
         let right_len = $right.len();
         let max_len = left_len.max(right_len);
-        unsafe {
-            to_output!($out, max_len, |output| {
-                if left_len == right_len {
-                    $func(ArrayInput($left), ArrayInput($right), output);
-                } else if left_len == 1 {
-                    $func(BroadcastInput($left, right_len), ArrayInput($right), output);
-                } else if right_len == 1 {
-                    $func(ArrayInput($left), BroadcastInput($right, left_len), output);
-                } else {
-                    panic!("Left length: {}, Right Length: {}", left_len, right_len);
-                }
-            });
-        }
+        to_output!($out, max_len, |output| {
+            if left_len == right_len {
+                $func(ArrayInput($left), ArrayInput($right), output);
+            } else if left_len == 1 {
+                $func(BroadcastInput($left, right_len), ArrayInput($right), output);
+            } else if right_len == 1 {
+                $func(ArrayInput($left), BroadcastInput($right, left_len), output);
+            } else {
+                panic!("Left length: {}, Right Length: {}", left_len, right_len);
+            }
+        });
     }
 }
 
@@ -320,26 +318,24 @@ macro_rules! run_trinary_op {
         let y_len = $y.len();
         let z_len = $z.len();
         let max_len = x_len.max(y_len).max(z_len);
-        unsafe {
-            to_output!($out, max_len, |output| {
-                if x_len > 0 && x_len == y_len && y_len == z_len {
-                    $func(ArrayInput($x), ArrayInput($y), ArrayInput($z), output);
-                } else {
-                    match (x_len, y_len, z_len) {
-                        (1, a, b) if a == b => {
-                            $func(BroadcastInput($x, max_len), ArrayInput($y), ArrayInput($z), output)
-                        },
-                        (a, 1, b) if a == b => {
-                            $func(ArrayInput($x), BroadcastInput($y, max_len), ArrayInput($z), output)
-                        },
-                        (a, b, 1) if a == b => {
-                            $func(ArrayInput($x), ArrayInput($y), BroadcastInput($z, max_len), output)
-                        },
-                        _ => panic!("x: {}, y: {}, z: {}", x_len, y_len, z_len)
-                    }
+        to_output!($out, max_len, |output| {
+            if x_len > 0 && x_len == y_len && y_len == z_len {
+                $func(ArrayInput($x), ArrayInput($y), ArrayInput($z), output);
+            } else {
+                match (x_len, y_len, z_len) {
+                    (1, a, b) if a == b => {
+                        $func(BroadcastInput($x, max_len), ArrayInput($y), ArrayInput($z), output)
+                    },
+                    (a, 1, b) if a == b => {
+                        $func(ArrayInput($x), BroadcastInput($y, max_len), ArrayInput($z), output)
+                    },
+                    (a, b, 1) if a == b => {
+                        $func(ArrayInput($x), ArrayInput($y), BroadcastInput($z, max_len), output)
+                    },
+                    _ => panic!("x: {}, y: {}, z: {}", x_len, y_len, z_len)
                 }
-            });
-        }
+            }
+        });
     }
 }
 
@@ -445,10 +441,14 @@ pub(crate) struct Multiply(NodeIdx, [ANode; 2], Computation);
 
 impl Multiply {
     pub(crate) fn new(left: ANode, right: ANode) -> ANode {
-        let idx = NodeIdx::new();
-        let value = Multiply::compute(&left, &right);
-        let node = Multiply(idx, [left, right], Computation::pooled(value));
-        ANode::new(Rc::new(node))
+        if left.get_id() == right.get_id() {
+            Pow2::new(left)
+        } else {
+            let idx = NodeIdx::new();
+            let value = Multiply::compute(&left, &right);
+            let node = Multiply(idx, [left, right], Computation::pooled(value));
+            ANode::new(Rc::new(node))
+        }
     }
 
     fn compute(left: &ANode, right: &ANode) -> MPVec {
@@ -554,7 +554,7 @@ impl Power {
         if exp.is_leaf() && !exp.requires_grad() {
             let v = exp.value();
             if v == &[2f32] {
-                return Multiply::new(base.clone(), base)
+                return Pow2::new(base.clone())
             } else if v == &[0.5f32] {
                 return SquareRoot::new(base)
             }
@@ -659,6 +659,50 @@ impl Node for SquareRoot {
         child_grads[0].iter_mut().zip(grad.iter().zip(x)).for_each(|(outi, (gi, xi))| {
             *outi += *gi * 0.5 / *xi;
         });
+    }
+
+}
+
+pub(crate) struct Pow2(NodeIdx, [ANode;1], Computation);
+
+impl Pow2 {
+    pub(crate) fn new(base: ANode) -> ANode {
+        let idx = NodeIdx::new();
+        let value = Pow2::compute(&base);
+        let node = Pow2(idx, [base], Computation::pooled(value));
+        ANode::new(Rc::new(node))
+    }
+
+    fn compute(left: &ANode) -> MPVec {
+        let lv = left.value();
+        let mut out = allocate_vec(lv.len());
+        let o = &mut out;
+        run_unary_op!(lv, o, simd_pow2);
+        out
+    }
+}
+
+impl Node for Pow2 {
+    #[inline]
+    fn get_id(&self) -> NodeIdx { self.0 }
+
+    fn get_children(&self) -> Option<&[ANode]> { 
+        Some(self.1.as_slice())
+    }
+
+    fn is_leaf(&self) -> bool { false }
+
+    fn value(&self) -> &[DType] {
+        &self.2.get()
+    }
+
+    fn requires_grad(&self) -> bool { false }
+
+    fn compute_grad(&self, grad: &[DType], child_grads: &mut [&mut [DType]]) {
+        let x = self.1[0].value();
+
+        let mut out: &mut [f32] = &mut child_grads[0];
+        run_binary_op!(grad, x, out, grad_pow2);
     }
 
 }
@@ -1303,6 +1347,20 @@ mod tests {
         let y_grad = graph.get_grad(&y).unwrap();
         assert_eq!(x_grad, &[3., 3.]);
         assert_eq!(y_grad, &[3.]);
+    }
+
+    #[test]
+    fn test_mul_4() {
+        let x = Variable::new(vec![2., 3.]);
+        let x2 = Multiply::new(x.clone(), x.clone());
+        let x4 = Multiply::new(x2.clone(), x2);
+        assert_eq!(x4.value(), &[2f32.powf(4.), 3f32.powf(4.)]);
+
+        let mut graph = Graph::new();
+        graph.backward(&x4);
+        let x_grad = graph.get_grad(&x).unwrap();
+
+        assert_eq!(x_grad, &[4. * 2f32.powf(3.), 4. * 3f32.powf(3.)]);
     }
 
     #[test]

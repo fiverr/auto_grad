@@ -402,3 +402,15 @@ unary_op!(
     |xi: f32| {xi.exp()}
 );
 
+unary_op!(
+    simd_pow2,
+    |ao| {_mm256_mul_ps(ao, ao)},
+    |xi: f32| {xi * xi}
+);
+
+binary_op!(
+    grad_pow2,
+    |go, ao| {_mm256_mul_ps(go, _mm256_mul_ps(ao, _mm256_set1_ps(2f32)))},
+    |gi: f32, xi: f32| {gi * 2f32 * xi}
+);
+
