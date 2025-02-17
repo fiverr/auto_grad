@@ -4,9 +4,10 @@ use std::ops::Add;
 use std::cell::UnsafeCell;
 use hashbrown::HashMap;
 use hashbrown::hash_map::Entry;
+
 use crate::{DType,ANode,NodeIdx,Node};
-use crate::vecops::iadd;
 use crate::pool::{allocate_vec,MPVec};
+use crate::vecops::{simd_iadd,ArrayInput,ArrayOutput};
 
 #[derive(Debug)]
 pub struct Graph {
@@ -76,7 +77,7 @@ impl Graph {
     fn add_or_update_grad(&mut self, node: &ANode, grad: &mut [f32]) {
         match self.gradients.entry(node.get_id()) {
             Entry::Occupied(mut entry) => {
-                iadd(entry.get_mut(), grad);
+                simd_iadd(ArrayInput(grad), ArrayOutput(entry.get_mut()));
             },
             Entry::Vacant(entry) => {
                 let mut v = allocate_vec(grad.len());

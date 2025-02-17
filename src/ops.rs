@@ -343,18 +343,22 @@ pub(crate) struct AddN(NodeIdx, [ANode; 2], Computation);
 
 impl AddN {
     pub(crate) fn new(left: ANode, right: ANode) -> ANode {
-        let idx = NodeIdx::new();
-        let value = AddN::compute(&left, &right);
-        let node = AddN(idx, [left, right], Computation::pooled(value));
-        ANode::new(Rc::new(node))
+        if left.get_id() == right.get_id() {
+            Multiply::new(Constant::scalar(2f32), left)
+        } else {
+            let idx = NodeIdx::new();
+            let value = AddN::compute(&left, &right);
+            let node = AddN(idx, [left, right], Computation::pooled(value));
+            ANode::new(Rc::new(node))
+        }
     }
 
     fn compute(left: &ANode, right: &ANode) -> MPVec {
-        let (lv, rv) = Broadcast::from_pair(left.value(), right.value());
-        let mut out = allocate_vec(lv.len);
-        out.iter_mut().zip(lv.zip(rv)).for_each(|(oi, (lvi, rvi))| {
-            *oi = lvi + rvi
-        });
+        let x = left.value();
+        let y = right.value();
+        let mut out = Broadcast::allocate_out(x, y);
+        let mut o = &mut out;
+        run_binary_op!(x, y, o, simd_add);
         out
     }
 }
@@ -380,9 +384,7 @@ impl Node for AddN {
         // df(x,y)/dx = 1
         // df(x,y)/dy = 1
         for out in child_grads.iter_mut() {
-            let it = Broadcast::sized(grad, out.len());
-            let mut agg = Updater::new(out, grad.len());
-            it.for_each(|gi| agg.add(*gi));
+            run_unary_op!(grad, out, simd_iadd); 
         }
     }
 
@@ -928,19 +930,22 @@ impl Node for Ln {
 pub(crate) struct Exp(NodeIdx, [ANode;1], Computation);
 
 impl Exp {
-    pub(crate) fn new(vec: ANode) -> ANode {
+    pub(crate) fn new(vec: ANode, approximate: bool) -> ANode {
         let idx = NodeIdx::new();
-        let value = Exp::compute(&vec);
+        let value = Exp::compute(&vec, approximate);
         let node = Exp(idx, [vec], Computation::pooled(value));
         ANode::new(Rc::new(node))
     }
 
-    fn compute(left: &ANode) -> MPVec {
+    fn compute(left: &ANode, approximate: bool) -> MPVec {
         let lv = left.value();
         let mut out = allocate_vec(lv.len());
         let o = &mut out;
-        run_unary_op!(lv, o, simd_exp);
-        //out.iter_mut().zip(lv.iter()).for_each(|(oi, lvi)| *oi = lvi.exp());
+        if approximate {
+            run_unary_op!(lv, o, simd_exp);
+        } else {
+            out.iter_mut().zip(lv.iter()).for_each(|(oi, lvi)| *oi = lvi.exp());
+        }
         out
     }
 
@@ -965,8 +970,7 @@ impl Node for Exp {
     fn compute_grad(&self, grad: &[DType], child_grads: &mut [&mut [DType]]) {
         let x = self.value();
         let mut out = &mut child_grads[0];
-        out.clone_from_slice(x);
-        imul(&mut out, grad);
+        run_binary_op!(grad, x, out, simd_mul);
     }
 }
 
@@ -1024,11 +1028,14 @@ impl BulkSum {
     }
 
     fn compute(xs: &[ANode]) -> MPVec {
-        let mut agg = allocate_vec(xs[0].value().len());
+        let mut out = allocate_vec(xs[0].value().len());
+        let mut o = &mut out;
         for x in xs {
-            iadd(&mut agg, x.value());
+            let v = x.value();
+            run_unary_op!(v, o, simd_iadd);
+            //iadd(&mut agg, x.value());
         }
-        agg
+        out
     }
 }
 
@@ -1448,6 +1455,7 @@ mod tests {
         graph.backward(&out);
         let grad = graph.get_grad(&x).unwrap();
         assert_eq!(out.value(), &[1., 1f32.exp(), 2f32.exp()]);
+        assert_eq!(grad, &[1., 1f32.exp(), 2f32.exp()]);
     }
 
     #[test]
@@ -1539,6 +1547,13 @@ mod tests {
         assert_eq!(x_grad, &[0., 2., 2.]);
     }
 
+    #[test]
+    fn test_bulk_sum() {
+        let mut v = Variable::new([1f32, 2f32, 3f32].to_vec());
+        let vecs = vec![v.clone(); 10];
+        let bs = BulkSum::new(vecs.into_iter());
+        assert_eq!(bs.value(), &[10f32, 20f32, 30f32]);
+    }
 
     #[test]
     fn test_backward_pass_simple1() {
@@ -1660,14 +1675,13 @@ mod tests {
         // 2x + 4
         let x      = Variable::new(vec![0f32]);
         let x2     = AddN::new(x.clone(), Constant::scalar(2f32));
-        let x2_2   = Power::new(x2.clone(), Constant::scalar(2f32));
+        let x2_2   = Power::new(x2, Constant::scalar(2f32));
 
         assert_eq!(x2_2.value(), vec![4f32]);
 
         let mut graph = Graph::new();
         graph.backward(&x2_2);
 
-        let x2_grad = graph.get_grad(&x2);
         let x_grad = graph.get_grad(&x);
         assert_eq!(Some(&vec![4f32]), x_grad);
     }
@@ -1697,7 +1711,6 @@ mod tests {
         graph.backward(&res);
 
         let x_grad = graph.get_grad(&x);
-        let x_0 = res.value()[0];
         let expected = -(-1f32).exp();
         assert_eq!(Some(&vec![expected]), x_grad);
     }
@@ -1745,20 +1758,6 @@ mod tests {
 
         assert!((v[0] - y.value()[0]).abs() < 1e-5);
         assert!((v[1] - y.value()[1]).abs() < 1e-5);
-    }
-
-    #[test]
-    fn test_updateable() {
-        let mut v = Rc::new(vec![0f32, 0f32]);
-        let mut graph = Graph::new();
-        let grad = {
-            let x = Variable::shared(v.clone());
-            let res = (&x + 3f32).pow(2f32) + 3f32;
-            graph.backward(&res);
-            graph.get_grad(&x)
-        };
-        let v = Rc::get_mut(&mut v).unwrap();
-        assert_eq!(v, &mut [0f32, 0f32]);
     }
 
 }

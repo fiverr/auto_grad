@@ -76,7 +76,11 @@ impl ANode {
     }
 
     pub fn exp(&self) -> ANode {
-        Exp::new(self.clone())
+        Exp::new(self.clone(), true)
+    }
+
+    pub fn exp_exact(&self) -> ANode {
+        Exp::new(self.clone(), false)
     }
 
     pub fn sum(&self) -> ANode {

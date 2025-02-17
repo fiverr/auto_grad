@@ -1,54 +1,5 @@
 use std::arch::x86_64::*;
 
-#[inline]
-pub fn add(l: &[f32], r: &[f32], out: &mut [f32]) {
-    l.iter().zip(r.iter()).zip(out.iter_mut()).for_each(|((li, ri), outi)| {
-        *outi = li + ri;
-    });
-}
-
-#[inline]
-pub fn iadd(l: &mut [f32], r: &[f32]) {
-    l.iter_mut().zip(r.iter()).for_each(|(li, ri)| {
-        *li += ri;
-    });
-}
-
-#[inline]
-pub fn sub(l: &[f32], r: &[f32], out: &mut [f32]) {
-    l.iter().zip(r.iter()).zip(out.iter_mut()).for_each(|((li, ri), outi)| {
-        *outi = li - ri;
-    });
-}
-
-#[inline]
-pub fn isub(l: &mut [f32], r: &[f32]) {
-    l.iter_mut().zip(r.iter()).for_each(|(li, ri)| {
-        *li -= ri;
-    });
-}
-
-#[inline]
-pub fn mul(l: &[f32], r: &[f32], out: &mut [f32]) {
-    l.iter().zip(r.iter()).zip(out.iter_mut()).for_each(|((li, ri), outi)| {
-        *outi = li * ri;
-    });
-}
-
-#[inline]
-pub fn imul(l: &mut [f32], r: &[f32]) {
-    l.iter_mut().zip(r.iter()).for_each(|(li, ri)| {
-        *li *= ri;
-    });
-}
-
-#[inline]
-pub fn div(l: &[f32], r: &[f32], out: &mut [f32]) {
-    l.iter().zip(r.iter()).zip(out.iter_mut()).for_each(|((li, ri), outi)| {
-        *outi = li / ri;
-    });
-}
-
 pub trait Input {
     unsafe fn fill_256(&self, idx: usize) -> __m256; 
     fn iter(self, idx: usize) -> impl Iterator<Item=f32>;
@@ -381,7 +332,7 @@ binary_op!(
 binary_op!(
     simd_add,
     _mm256_add_ps,
-    |xi, yi| { xi - yi }
+    |xi, yi| { xi + yi }
 );
 
 unary_op!(
