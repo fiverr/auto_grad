@@ -46,6 +46,9 @@ impl RequiresGrad {
 }
 
 impl Node for RequiresGrad {
+
+    fn op_name(&self) -> &str { "RequiresGrad" }
+
     #[inline]
     fn get_id(&self) -> NodeIdx { self.0.get_id() }
 
@@ -62,6 +65,40 @@ impl Node for RequiresGrad {
 
     #[inline]
     fn requires_grad(&self) -> bool { true }
+
+    #[inline]
+    fn compute_grad(&self, grad: &[DType], child_grads: &mut [&mut [DType]]) {
+        self.0.compute_grad(grad, child_grads)
+    }
+}
+
+pub struct Named(ANode, String);
+
+impl Named {
+    pub fn new(node: ANode, name: String) -> ANode {
+        let v = Named(node, name);
+        ANode::new(Rc::new(v))
+    }
+}
+
+impl Node for Named {
+
+    fn op_name(&self) -> &str { &self.1 }
+
+    #[inline]
+    fn get_id(&self) -> NodeIdx { self.0.get_id() }
+
+    #[inline]
+    fn is_leaf(&self) -> bool { self.0.is_leaf() }
+
+    #[inline]
+    fn value(&self) -> &[DType] { self.0.value() }
+
+    #[inline]
+    fn get_children(&self) -> Option<&[ANode]> { self.0.get_children() }
+
+    #[inline]
+    fn requires_grad(&self) -> bool { self.0.requires_grad() }
 
     #[inline]
     fn compute_grad(&self, grad: &[DType], child_grads: &mut [&mut [DType]]) {
@@ -96,6 +133,8 @@ impl Variable {
 }
 
 impl Node for Variable {
+    fn op_name(&self) -> &str { "Variable" }
+
     #[inline]
     fn get_id(&self) -> NodeIdx { self.0 }
 
@@ -137,6 +176,7 @@ impl Constant {
 }
 
 impl Node for Constant {
+    fn op_name(&self) -> &str { "Constant" }
 
     #[inline]
     fn get_id(&self) -> NodeIdx { self.0 }
@@ -175,8 +215,8 @@ impl <'a> Broadcast<'a> {
                 panic!("Input vector is zero!");
             },
             (l, r) if l == r => l_len,
-            (1, r) => r_len,
-            (l, 1) => l_len,
+            (1, r) => r,
+            (l, 1) => l,
             (_, _) => {
                 panic!("Input vectors mismatched is zero!");
             }
@@ -223,15 +263,14 @@ impl <'a> Iterator for Broadcast<'a> {
 
 struct Updater<'a> {
     data: &'a mut [DType],
-    cur_idx: usize,
-    max_size: usize
+    cur_idx: usize
 }
 
 impl <'a> Updater<'a> {
     fn new(data: &'a mut [DType], max_size: usize) -> Self {
         let v_len = data.len();
         if v_len == max_size || v_len == 1 {
-            Updater { data, cur_idx: 0, max_size }
+            Updater { data, cur_idx: 0 }
         } else {
             panic!("Cannot broadcast values!");
         }
@@ -249,18 +288,6 @@ impl <'a> Updater<'a> {
                 *self.data.get_unchecked_mut(self.cur_idx) += v;
             }
             self.cur_idx += 1;
-        }
-    }
-}
-
-macro_rules! to_output {
-    ($out:tt, $len:expr) => {
-        if $out.len() == $len {
-            ArrayOutput($out)
-        } else if $out.len() == 1 {
-            BroadcastOutput($out)
-        } else {
-            panic!("Output is incompatible with input");
         }
     }
 }
@@ -357,13 +384,15 @@ impl AddN {
         let x = left.value();
         let y = right.value();
         let mut out = Broadcast::allocate_out(x, y);
-        let mut o = &mut out;
+        let o = &mut out;
         run_binary_op!(x, y, o, simd_add);
         out
     }
 }
 
 impl Node for AddN {
+    fn op_name(&self) -> &str { "Add" }
+
     #[inline]
     fn get_id(&self) -> NodeIdx { self.0 }
 
@@ -411,6 +440,8 @@ impl Subtract {
 }
 
 impl Node for Subtract {
+    fn op_name(&self) -> &str { "Subtract" }
+
     #[inline]
     fn get_id(&self) -> NodeIdx { self.0 }
 
@@ -463,6 +494,8 @@ impl Multiply {
 }
 
 impl Node for Multiply {
+    fn op_name(&self) -> &str { "Multiply" }
+
     #[inline]
     fn get_id(&self) -> NodeIdx { self.0 }
 
@@ -517,6 +550,8 @@ impl Divide {
 }
 
 impl Node for Divide {
+    fn op_name(&self) -> &str { "Divide" }
+
     #[inline]
     fn get_id(&self) -> NodeIdx { self.0 }
 
@@ -579,6 +614,8 @@ impl Power {
 }
 
 impl Node for Power {
+    fn op_name(&self) -> &str { "Power" }
+
     #[inline]
     fn get_id(&self) -> NodeIdx { self.0 }
 
@@ -639,6 +676,8 @@ impl SquareRoot {
 }
 
 impl Node for SquareRoot {
+    fn op_name(&self) -> &str { "Sqrt" }
+
     #[inline]
     fn get_id(&self) -> NodeIdx { self.0 }
 
@@ -685,6 +724,8 @@ impl Pow2 {
 }
 
 impl Node for Pow2 {
+    fn op_name(&self) -> &str { "Squared" }
+
     #[inline]
     fn get_id(&self) -> NodeIdx { self.0 }
 
@@ -703,7 +744,7 @@ impl Node for Pow2 {
     fn compute_grad(&self, grad: &[DType], child_grads: &mut [&mut [DType]]) {
         let x = self.1[0].value();
 
-        let mut out: &mut [f32] = &mut child_grads[0];
+        let out: &mut [f32] = &mut child_grads[0];
         run_binary_op!(grad, x, out, grad_pow2);
     }
 
@@ -728,6 +769,8 @@ impl SumVec {
 }
 
 impl Node for SumVec {
+    fn op_name(&self) -> &str { "SumVec" }
+
     #[inline]
     fn get_id(&self) -> NodeIdx { self.0 }
 
@@ -771,6 +814,9 @@ impl Cos {
 }
 
 impl Node for Cos {
+    
+    fn op_name(&self) -> &str { "Cos" }
+
     #[inline]
     fn get_id(&self) -> NodeIdx { self.0 }
 
@@ -815,6 +861,8 @@ impl Sin {
 }
 
 impl Node for Sin {
+    fn op_name(&self) -> &str { "Sin" }
+
     #[inline]
     fn get_id(&self) -> NodeIdx { self.0 }
 
@@ -860,6 +908,8 @@ impl Tanh {
 }
 
 impl Node for Tanh {
+    fn op_name(&self) -> &str { "Tanh" }
+
     #[inline]
     fn get_id(&self) -> NodeIdx { self.0 }
 
@@ -903,6 +953,8 @@ impl Ln {
 }
 
 impl Node for Ln {
+    fn op_name(&self) -> &str { "ln" }
+
     #[inline]
     fn get_id(&self) -> NodeIdx { self.0 }
 
@@ -952,6 +1004,8 @@ impl Exp {
 }
 
 impl Node for Exp {
+    fn op_name(&self) -> &str { "Exp" }
+
     #[inline]
     fn get_id(&self) -> NodeIdx { self.0 }
 
@@ -969,7 +1023,7 @@ impl Node for Exp {
 
     fn compute_grad(&self, grad: &[DType], child_grads: &mut [&mut [DType]]) {
         let x = self.value();
-        let mut out = &mut child_grads[0];
+        let out = &mut child_grads[0];
         run_binary_op!(grad, x, out, simd_mul);
     }
 }
@@ -994,6 +1048,8 @@ impl Negate {
 }
 
 impl Node for Negate {
+    fn op_name(&self) -> &str { "Negate" }
+
     #[inline]
     fn get_id(&self) -> NodeIdx { self.0 }
 
@@ -1029,7 +1085,7 @@ impl BulkSum {
 
     fn compute(xs: &[ANode]) -> MPVec {
         let mut out = allocate_vec(xs[0].value().len());
-        let mut o = &mut out;
+        let o = &mut out;
         for x in xs {
             let v = x.value();
             run_unary_op!(v, o, simd_iadd);
@@ -1040,6 +1096,8 @@ impl BulkSum {
 }
 
 impl Node for BulkSum {
+    fn op_name(&self) -> &str { "BulkSum" }
+
     #[inline]
     fn get_id(&self) -> NodeIdx { self.0 }
 
@@ -1085,6 +1143,8 @@ impl Maximum {
 }
 
 impl Node for Maximum {
+    fn op_name(&self) -> &str { "Maximum" }
+
     #[inline]
     fn get_id(&self) -> NodeIdx { self.0 }
 
@@ -1141,6 +1201,8 @@ impl Minimum {
 }
 
 impl Node for Minimum {
+    fn op_name(&self) -> &str { "Minimum" }
+
     #[inline]
     fn get_id(&self) -> NodeIdx { self.0 }
 
@@ -1201,6 +1263,8 @@ impl Concat {
 }
 
 impl Node for Concat {
+    fn op_name(&self) -> &str { "Concat" }
+
     #[inline]
     fn get_id(&self) -> NodeIdx { self.0 }
 
@@ -1238,6 +1302,8 @@ impl Slice {
 }
 
 impl Node for Slice {
+    fn op_name(&self) -> &str { "Slice" }
+
     #[inline]
     fn get_id(&self) -> NodeIdx { self.0 }
 

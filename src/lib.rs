@@ -30,8 +30,9 @@ impl NodeIdx {
     }
 }
 
-
 pub trait Node {
+    fn op_name(&self) -> &str;
+
     fn get_id(&self) -> NodeIdx;
 
     fn is_leaf(&self) -> bool;
@@ -42,7 +43,6 @@ pub trait Node {
 
     fn requires_grad(&self) -> bool;
 
-    //fn compute_grad(&self, _grad: &[DType], _results: &mut [MPVec]) { }
     fn compute_grad(&self, _grad: &[DType], _results: &mut [&mut [DType]]) { }
 
 }
@@ -76,11 +76,11 @@ impl ANode {
     }
 
     pub fn exp(&self) -> ANode {
-        Exp::new(self.clone(), true)
+        Exp::new(self.clone(), false)
     }
 
-    pub fn exp_exact(&self) -> ANode {
-        Exp::new(self.clone(), false)
+    pub fn exp_approx(&self) -> ANode {
+        Exp::new(self.clone(), true)
     }
 
     pub fn sum(&self) -> ANode {
@@ -89,6 +89,10 @@ impl ANode {
 
     pub fn slice(&self, start: usize, len: usize) -> ANode {
         Slice::new(self.clone(), start, len)
+    }
+
+    pub fn name(&self, name: String) -> ANode {
+        Named::new(self.clone(), name)
     }
 
     fn require_grad(self) -> ANode {

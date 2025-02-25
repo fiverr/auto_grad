@@ -170,8 +170,32 @@ impl Graph {
         }
     }
 
+    pub fn print_graph(node: &ANode) {
+        let mut s = String::new();
+        Graph::print_graph_level(node, 0, &mut s);
+    }
 
+    fn print_graph_level(node: &ANode, depth: usize, buff: &mut String) {
+        buff.clear();
+        for _ in 0..depth {
+            buff.push(' ');
+        }
+        if node.is_leaf() {
+            eprintln!("{}- {}({:?}", buff, node.op_name(), node.value());
+        } else {
+            eprintln!("{}- {}({:?} {{", buff, node.op_name(), node.value());
+            if let Some(children) = node.get_children() {
+                for c in children {
+                    Graph::print_graph_level(c, depth + 1, buff);
+                }
+            }
+            let spaces = &buff[..depth];
+            eprintln!("{}}}", spaces);
+        }
+    }
 }
+
+
 
 pub(crate) struct Run(NodeIdx, Vec<ANode>);
 
@@ -183,6 +207,8 @@ impl Run {
 }
 
 impl Node for Run {
+    fn op_name(&self) -> &str { "Run" }
+
     fn get_id(&self) -> NodeIdx { self.0.clone() }
 
     fn get_children(&self) -> Option<&[ANode]> { 

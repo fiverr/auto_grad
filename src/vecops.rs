@@ -57,17 +57,17 @@ pub struct BroadcastOutput<'a>(pub &'a mut [f32], pub usize);
 impl <'a> Output for BroadcastOutput<'a> {
 
     #[inline(always)]
-    unsafe fn fill_256(&self, idx: usize) -> __m256 {
+    unsafe fn fill_256(&self, _idx: usize) -> __m256 {
         _mm256_set1_ps(self.0[0])
     }
 
     #[inline(always)]
-    unsafe fn store(&mut self, register: __m256, idx: usize) {
+    unsafe fn store(&mut self, register: __m256, _idx: usize) {
         self.0[0] += hsum_avx_ps(register)
     }
 
     #[inline(always)]
-    fn store_one(&mut self, value: f32, idx: usize) {
+    fn store_one(&mut self, value: f32, _idx: usize) {
         self.0[0] += value
     }
 
